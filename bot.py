@@ -71,11 +71,15 @@ def kb(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
 
 def main_kb(owner: bool = False) -> InlineKeyboardMarkup:
     rows = [
-        [button("✦ Make Post", "make", "success"), button("⌘ My Posts", "posts", "primary")],
-        [button("◈ Emoji Extractor", "extract", "primary"), button("▣ Help", "help", "primary")],
+        [button("🔥 MAKE POST", "make", "danger"), button("🎨 EMOJI EXTRACTOR", "extract", "danger")],
     ]
     if owner:
-        rows.append([button("⚙ Owner Panel", "owner", "danger")])
+        rows.append([button("📣 BROADCAST", "obroadcast", "success"), button("📚 MY POSTS", "posts", "primary")])
+    else:
+        rows.append([button("📚 MY POSTS", "posts", "primary")])
+    rows.append([button("🆘 HELP", "help", "danger"), button("ℹ️ ABOUT BOT", "help", "success")])
+    if owner:
+        rows.append([button("📊 STATS", "ostats", "danger")])
     return kb(rows)
 
 def reply_menu(owner: bool = False) -> ReplyKeyboardMarkup:
@@ -124,7 +128,7 @@ async def welcome(message: Message, bot: Bot) -> None:
     user["username"] = message.from_user.username
     user.setdefault("history", []).append({"event": "start", "at": datetime.now(timezone.utc).isoformat()})
     await store.save_user(message.from_user.id, user)
-    await message.answer(deco(f"<b>{BRAND}</b>") + "\n\nPremium post creation suite ready.", reply_markup=reply_menu(message.from_user.id in OWNER_IDS))
+    await message.answer(deco(f"<b>{BRAND}</b>") + "\n\nPremium post creation suite ready.", reply_markup=main_kb(message.from_user.id in OWNER_IDS))
 
 
 @router.message(Command("start"))
@@ -138,15 +142,15 @@ async def reply_make(message: Message, state: FSMContext):
 @router.message(StateFilter(None), F.text == "📚 MY POSTS")
 async def reply_posts(message: Message):
     user = await store.load_user(message.from_user.id)
-    await message.answer(deco(f"<b>MY POSTS</b>\n\nSaved posts: {len(user.get('posts', []))}"), reply_markup=reply_menu(message.from_user.id in OWNER_IDS))
+    await message.answer(deco(f"<b>MY POSTS</b>\n\nSaved posts: {len(user.get('posts', []))}"), reply_markup=main_kb(message.from_user.id in OWNER_IDS))
 
 @router.message(StateFilter(None), F.text == "🎨 EMOJI EXTRACTOR")
 async def reply_extract(message: Message):
-    await message.answer(deco("<b>EMOJI EXTRACTOR</b>\n\nPremium emoji wala message forward karein."), reply_markup=reply_menu(message.from_user.id in OWNER_IDS))
+    await message.answer(deco("<b>EMOJI EXTRACTOR</b>\n\nPremium emoji wala message forward karein."), reply_markup=main_kb(message.from_user.id in OWNER_IDS))
 
 @router.message(StateFilter(None), F.text.in_({"🆘 HELP", "ℹ️ ABOUT BOT"}))
 async def reply_help(message: Message):
-    await message.answer(deco("<b>HELP</b>\n\nMake Post → media → button → design → preview → publish."), reply_markup=reply_menu(message.from_user.id in OWNER_IDS))
+    await message.answer(deco("<b>HELP</b>\n\nMake Post → media → button → design → preview → publish."), reply_markup=main_kb(message.from_user.id in OWNER_IDS))
 
 @router.message(StateFilter(None), F.text == "📊 STATS")
 async def reply_stats(message: Message):
@@ -156,7 +160,7 @@ async def reply_stats(message: Message):
         try:
             data = json.loads(file.read_text(encoding="utf-8")); users += 1; posts += len(data.get("posts", []))
         except Exception: pass
-    await message.answer(deco(f"<b>BOT STATS</b>\n\nUsers: {users}\nPosts: {posts}\nEmoji pool: {len(store.emoji_ids)}"), reply_markup=reply_menu(True))
+    await message.answer(deco(f"<b>BOT STATS</b>\n\nUsers: {users}\nPosts: {posts}\nEmoji pool: {len(store.emoji_ids)}"), reply_markup=main_kb(True))
 
 @router.message(StateFilter(None), F.text == "📣 BROADCAST")
 async def reply_broadcast(message: Message, state: FSMContext):
@@ -291,7 +295,7 @@ async def done(call: CallbackQuery, state: FSMContext):
     await store.save_user(call.from_user.id, user)
     await send_final_post(call.message, data)
     await state.clear()
-    await call.message.answer(deco("<b>POST READY</b>") + "\n\nAapki final post inbox mein deliver kar di gayi hai.", reply_markup=reply_menu(call.from_user.id in OWNER_IDS))
+    await call.message.answer(deco("<b>POST READY</b>") + "\n\nAapki final post inbox mein deliver kar di gayi hai.", reply_markup=main_kb(call.from_user.id in OWNER_IDS))
 
 @router.callback_query(Wizard.preview, F.data == "publish")
 async def publish_start(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.destinations); await call.message.answer(deco("<b>MULTI-PUBLISH</b>") + "\n\nEk hi message mein channel/group links ya private chat IDs bhejein. Bot sab detect karega.\n\nPrivate destination ke liye pehle bot ko admin banayein. Har destination new line par dena behtar hai.", reply_markup=kb([[button("Cancel", "cancel", "danger")]]))
@@ -346,7 +350,7 @@ async def publish_destinations(message: Message, state: FSMContext, bot: Bot):
     await message.answer(deco("<b>PUBLISH REPORT</b>")+"\n\n"+("\n".join(results) if results else "Koi valid link/ID detect nahi hua.")); await state.clear()
 
 @router.callback_query(F.data == "cancel")
-async def cancel(call: CallbackQuery, state: FSMContext): await state.clear(); await call.message.answer(deco("Draft deleted."), reply_markup=reply_menu(call.from_user.id in OWNER_IDS))
+async def cancel(call: CallbackQuery, state: FSMContext): await state.clear(); await call.message.answer(deco("Draft deleted."), reply_markup=main_kb(call.from_user.id in OWNER_IDS))
 
 @router.callback_query(F.data == "owner")
 async def owner_panel(call: CallbackQuery):
