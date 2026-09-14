@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import os
 import random
@@ -28,13 +29,13 @@ PRIVATE_REQUIRED = pyconfig.REQUIRED_PRIVATE_CHAT_ID
 BRAND = pyconfig.BRAND
 store = GitHubJSONStore()
 router = Router()
+VALID_CUSTOM_EMOJI_IDS: set[str] = set()
 
 
 def em(user_id: str | int, fallback: str = "✦") -> str:
-    # Do not inject unverified custom-emoji IDs into HTML messages. Telegram
-    # rejects an unknown/invalid ID with ENTITY_TEXT_INVALID and the whole
-    # message then fails. The IDs remain available to the owner emoji pool;
-    # normal UI messages use a safe Unicode fallback until an ID is verified.
+    emoji_id = str(user_id)
+    if emoji_id in VALID_CUSTOM_EMOJI_IDS:
+        return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
     return fallback
 
 
@@ -169,13 +170,16 @@ def decorate_text(text: str, style: str, refresh: int = 0) -> str:
         if any(w in low for w in words): category = key; break
     pool = store.emoji_ids or ["5449569374065152798"]
     random.seed(f"{text}:{style}:{refresh}"); marks = [em(x) for x in random.sample(pool, min(5, len(pool)))]
-    if style == "terminal": return "<pre>┌─[ SKX_TALHA@POST-MAKER ]\n│ STATUS: READY\n│ MODE: " + category.upper() + "\n└─$ " + text.replace("<", "&lt;").replace(">", "&gt;") + "</pre>\n" + " ".join(marks)
-    if style == "hacker": return "╔═══[ SKX // SECURE DROP ]═══╗\n" + " ".join(marks[:2]) + " <b>ACCESS NODE: " + category.upper() + "</b>\n\n" + text + "\n╚═══════════════════════════╝\n" + " ".join(marks[2:])
-    return "╭━━━〔 " + " ".join(marks[:2]) + " PREMIUM CARD 〕━━━╮\n\n" + text + "\n\n" + " ".join(marks[2:]) + "\n╰━━━━━━━━━━━━━━━━━━━━━━━━╯"
+    safe_text = html.escape(text)
+    if style == "terminal": return "<pre>┌─[ SKX_TALHA@POST-MAKER ]\n│ STATUS: READY\n│ MODE: " + category.upper() + "\n└─$ " + safe_text + "</pre>\n" + " ".join(marks)
+    if style == "hacker": return "╔═══[ SKX // SECURE DROP ]═══╗\n" + " ".join(marks[:2]) + " <b>ACCESS NODE: " + category.upper() + "</b>\n\n" + safe_text + "\n╚═══════════════════════════╝\n" + " ".join(marks[2:])
+    return "╭━━━〔 " + " ".join(marks[:2]) + " PREMIUM CARD 〕━━━╮\n\n" + safe_text + "\n\n" + " ".join(marks[2:]) + "\n╰━━━━━━━━━━━━━━━━━━━━━━━━╯"
 
 async def show_preview(message: Message, state: FSMContext):
     data = await state.get_data(); refresh = data.get("refresh", 0); rendered = decorate_text(data.get("text", ""), data.get("design", "card"), refresh)
     rows = [[button("↻ Refresh Emoji", "refresh", "primary"), button("Change Design", "change_design", "success")], [button("Delete Post", "cancel", "danger"), button("✓ Done", "done", "success")], [button("Publish this post to my channel", "publish", "primary")]]
+    if data.get("button_name") and data.get("button_url"):
+        rows.insert(0, [url_button(data["button_name"], data["button_url"], "success")])
     markup = kb(rows)
     if data.get("media_type") == "photo": await message.answer_photo(data["media_id"], caption=rendered, reply_markup=markup)
     elif data.get("media_type") == "video": await message.answer_video(data["media_id"], caption=rendered, reply_markup=markup)
@@ -304,7 +308,14 @@ async def main() -> None:
     await store.initialize()
     persisted = await store.load_meta()
     OWNER_IDS.update(int(x) for x in persisted.get("owner_ids", []))
-    bot=Bot(TOKEN,default=DefaultBotProperties(parse_mode=ParseMode.HTML)); dp=Dispatcher(); dp.include_router(router)
+    bot=Bot(TOKEN,default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    global VALID_CUSTOM_EMOJI_IDS
+    try:
+        stickers = await bot.get_custom_emoji_stickers(custom_emoji_ids=list(store.emoji_ids))
+        VALID_CUSTOM_EMOJI_IDS = {str(sticker.custom_emoji_id) for sticker in stickers if sticker.custom_emoji_id}
+    except Exception:
+        VALID_CUSTOM_EMOJI_IDS = set()
+    dp=Dispatcher(); dp.include_router(router)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
 if __name__ == "__main__": asyncio.run(main())
