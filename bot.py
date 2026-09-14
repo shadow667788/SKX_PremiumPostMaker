@@ -45,16 +45,22 @@ def em(user_id: str | int, fallback: str = "✦") -> str:
 
 def deco(text: str, count: int = 2) -> str:
     pool = store.emoji_ids or ["5449569374065152798"]
-    return " ".join(em(x) for x in random.sample(pool, min(count, len(pool)))) + " " + text
+    return " ".join(em(x, SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)]) for i, x in enumerate(random.sample(pool, min(count, len(pool))))) + " " + text
+
+def icon_for(label: str, explicit: str | None = None) -> str | None:
+    if explicit in VALID_CUSTOM_EMOJI_IDS:
+        return explicit
+    ids = sorted(VALID_CUSTOM_EMOJI_IDS)
+    return ids[abs(hash(label)) % len(ids)] if ids else None
 
 
 def button(text: str, callback: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    icon_id = icon if icon in VALID_CUSTOM_EMOJI_IDS else next(iter(VALID_CUSTOM_EMOJI_IDS), None)
+    icon_id = icon_for(text, icon)
     return InlineKeyboardButton(text=text, callback_data=callback, style=style, icon_custom_emoji_id=icon_id)
 
 
 def url_button(text: str, url: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    icon_id = icon if icon in VALID_CUSTOM_EMOJI_IDS else next(iter(VALID_CUSTOM_EMOJI_IDS), None)
+    icon_id = icon_for(text, icon)
     return InlineKeyboardButton(text=text, url=url, style=style, icon_custom_emoji_id=icon_id)
 
 
@@ -169,16 +175,31 @@ async def design(call: CallbackQuery, state: FSMContext):
     await state.update_data(design=call.data.removeprefix("design_")); await state.set_state(Wizard.preview); await show_preview(call.message, state)
 
 KEYWORDS = {"warning": ["warning", "alert", "danger", "caution"], "tech": ["code", "python", "bot", "api", "tech"], "offer": ["offer", "sale", "free", "deal", "price"], "news": ["news", "update", "announcement"], "gaming": ["game", "gaming", "play"], "hacker": ["hack", "security", "cyber", "terminal"]}
+SAFE_FALLBACKS = ["🔥", "⚡", "🚀", "💎", "🌟", "🛡️", "🎯", "🧿", "🛰️", "💠"]
+
+def split_title_body(text: str) -> tuple[str, str]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return "Untitled Post", ""
+    return lines[0][:96], "\n".join(lines[1:]) or lines[0]
+
 def decorate_text(text: str, style: str, refresh: int = 0) -> str:
     low = text.lower(); category = "general"
     for key, words in KEYWORDS.items():
         if any(w in low for w in words): category = key; break
     pool = store.emoji_ids or ["5449569374065152798"]
-    random.seed(f"{text}:{style}:{refresh}"); marks = [em(x) for x in random.sample(pool, min(5, len(pool)))]
-    safe_text = html.escape(text)
-    if style == "terminal": return "<pre>┌─[ SKX_TALHA@POST-MAKER ]\n│ STATUS: READY\n│ MODE: " + category.upper() + "\n└─$ " + safe_text + "</pre>\n" + " ".join(marks)
-    if style == "hacker": return "╔═══[ SKX // SECURE DROP ]═══╗\n" + " ".join(marks[:2]) + " <b>ACCESS NODE: " + category.upper() + "</b>\n\n" + safe_text + "\n╚═══════════════════════════╝\n" + " ".join(marks[2:])
-    return "╭━━━〔 " + " ".join(marks[:2]) + " PREMIUM CARD 〕━━━╮\n\n" + safe_text + "\n\n" + " ".join(marks[2:]) + "\n╰━━━━━━━━━━━━━━━━━━━━━━━━╯"
+    random.seed(f"{text}:{style}:{refresh}")
+    chosen = random.sample(pool, min(7, len(pool)))
+    while len(chosen) < 7:
+        chosen.append(pool[len(chosen) % len(pool)])
+    marks = [em(x, SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)]) for i, x in enumerate(chosen)]
+    title, body = split_title_body(text)
+    safe_title, safe_body = html.escape(title), html.escape(body)
+    if style == "terminal":
+        return "<pre>╭─[ " + safe_title + " ]\n│ " + marks[0] + " STATUS: ONLINE\n│ " + marks[1] + " MODE: " + category.upper() + "\n╰─$ " + safe_body + "</pre>\n" + " ".join(marks[2:5])
+    if style == "hacker":
+        return "╔══════════════════════╗\n" + marks[0] + " <b>" + safe_title + "</b> " + marks[1] + "\n╠─ " + marks[2] + " SIGNAL: ACTIVE\n╠─ " + marks[3] + " NODE: " + category.upper() + "\n╠─ " + marks[4] + " LOADING COMPLETE\n╠══════════════════════╣\n" + safe_body + "\n╚══════════════════════╝\n" + " ".join(marks[5:])
+    return "╭━━━━━━━━━━━━━━━━━━━━╮\n" + marks[0] + " <b>" + safe_title + "</b> " + marks[1] + "\n╰━━━━━━━━━━━━━━━━━━━━╯\n\n" + safe_body + "\n\n" + marks[2] + "  " + marks[3] + "  " + marks[4] + "\n╭━━━━━━━━━━━━━━━━━━━━╮\n" + marks[5] + "  " + marks[6] + "\n╰━━━━━━━━━━━━━━━━━━━━╯"
 
 async def show_preview(message: Message, state: FSMContext):
     data = await state.get_data(); refresh = data.get("refresh", 0); rendered = decorate_text(data.get("text", ""), data.get("design", "card"), refresh)
@@ -197,7 +218,7 @@ async def refresh(call: CallbackQuery, state: FSMContext): data=await state.get_
 async def change_design(call: CallbackQuery, state: FSMContext): await choose_design(call.message, state)
 @router.callback_query(Wizard.preview, F.data == "done")
 async def done(call: CallbackQuery, state: FSMContext):
-    data=await state.get_data(); user=await store.load_user(call.from_user.id); user.setdefault("posts", []).append({"text":data.get("text"),"design":data.get("design"),"button":data.get("button_url"),"created_at":datetime.now(timezone.utc).isoformat()}); await store.save_user(call.from_user.id,user); await state.clear(); await call.message.answer(deco("<b>POST READY</b>")+"\n\nPost aapke history mein save ho gayi.", reply_markup=main_kb(call.from_user.id in OWNER_IDS))
+    data=await state.get_data(); user=await store.load_user(call.from_user.id); user.setdefault("posts", []).append({"text":data.get("text"),"created_at":datetime.now(timezone.utc).isoformat()}); await store.save_user(call.from_user.id,user); await state.clear(); await call.message.answer(deco("<b>POST READY</b>")+"\n\nSirf aapka original text history mein save hua hai.", reply_markup=main_kb(call.from_user.id in OWNER_IDS))
 
 @router.callback_query(Wizard.preview, F.data == "publish")
 async def publish_start(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.destinations); await call.message.answer(deco("<b>MULTI-PUBLISH</b>") + "\n\nEk hi message mein channel/group links ya private chat IDs bhejein. Bot sab detect karega.\n\nPrivate destination ke liye pehle bot ko admin banayein. Har destination new line par dena behtar hai.", reply_markup=kb([[button("Cancel", "cancel", "danger")]]))
