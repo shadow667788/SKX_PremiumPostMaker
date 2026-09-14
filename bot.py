@@ -45,12 +45,13 @@ def deco(text: str, count: int = 2) -> str:
 
 
 def button(text: str, callback: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    # Keep callback buttons compatible with all Telegram Bot API versions.
-    return InlineKeyboardButton(text=text, callback_data=callback, style=style)
+    icon_id = icon if icon in VALID_CUSTOM_EMOJI_IDS else (random.choice(tuple(VALID_CUSTOM_EMOJI_IDS)) if VALID_CUSTOM_EMOJI_IDS else None)
+    return InlineKeyboardButton(text=text, callback_data=callback, style=style, icon_custom_emoji_id=icon_id)
 
 
 def url_button(text: str, url: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, url=url, style=style)
+    icon_id = icon if icon in VALID_CUSTOM_EMOJI_IDS else (random.choice(tuple(VALID_CUSTOM_EMOJI_IDS)) if VALID_CUSTOM_EMOJI_IDS else None)
+    return InlineKeyboardButton(text=text, url=url, style=style, icon_custom_emoji_id=icon_id)
 
 
 def kb(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
@@ -311,8 +312,20 @@ async def main() -> None:
     bot=Bot(TOKEN,default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     global VALID_CUSTOM_EMOJI_IDS
     try:
-        stickers = await bot.get_custom_emoji_stickers(custom_emoji_ids=list(store.emoji_ids))
-        VALID_CUSTOM_EMOJI_IDS = {str(sticker.custom_emoji_id) for sticker in stickers if sticker.custom_emoji_id}
+        for start in range(0, len(store.emoji_ids), 50):
+            chunk = store.emoji_ids[start:start + 50]
+            try:
+                stickers = await bot.get_custom_emoji_stickers(custom_emoji_ids=chunk)
+                VALID_CUSTOM_EMOJI_IDS.update(str(sticker.custom_emoji_id) for sticker in stickers if sticker.custom_emoji_id)
+            except Exception:
+                # An invalid ID can reject a whole request; isolate it without
+                # preventing the remaining valid premium IDs from working.
+                for emoji_id in chunk:
+                    try:
+                        stickers = await bot.get_custom_emoji_stickers(custom_emoji_ids=[emoji_id])
+                        VALID_CUSTOM_EMOJI_IDS.update(str(sticker.custom_emoji_id) for sticker in stickers if sticker.custom_emoji_id)
+                    except Exception:
+                        continue
     except Exception:
         VALID_CUSTOM_EMOJI_IDS = set()
     dp=Dispatcher(); dp.include_router(router)
