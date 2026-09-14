@@ -16,7 +16,7 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup
 
 import config as pyconfig
 from github_store import GitHubJSONStore
@@ -77,6 +77,16 @@ def main_kb(owner: bool = False) -> InlineKeyboardMarkup:
         rows.append([button("⚙ Owner Panel", "owner", "danger")])
     return kb(rows)
 
+def reply_menu(owner: bool = False) -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text="🔥 MAKE POST"), KeyboardButton(text="🎨 EMOJI EXTRACTOR")],
+        [KeyboardButton(text="📣 BROADCAST"), KeyboardButton(text="📚 MY POSTS")],
+        [KeyboardButton(text="🆘 HELP"), KeyboardButton(text="ℹ️ ABOUT BOT")],
+    ]
+    if owner:
+        rows.append([KeyboardButton(text="📊 STATS")])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True)
+
 
 async def is_member(bot: Bot, user_id: int, chat: str | int) -> bool:
     try:
@@ -113,11 +123,45 @@ async def welcome(message: Message, bot: Bot) -> None:
     user["username"] = message.from_user.username
     user.setdefault("history", []).append({"event": "start", "at": datetime.now(timezone.utc).isoformat()})
     await store.save_user(message.from_user.id, user)
-    await message.answer(deco(f"<b>{BRAND}</b>") + "\n\nPremium post creation suite ready.", reply_markup=main_kb(message.from_user.id in OWNER_IDS))
+    await message.answer(deco(f"<b>{BRAND}</b>") + "\n\nPremium post creation suite ready.", reply_markup=reply_menu(message.from_user.id in OWNER_IDS))
 
 
 @router.message(Command("start"))
 async def start(message: Message, bot: Bot): await welcome(message, bot)
+
+@router.message(StateFilter(None), F.text == "🔥 MAKE POST")
+async def reply_make(message: Message, state: FSMContext):
+    await state.clear(); await state.set_state(Wizard.text)
+    await message.answer(deco("<b>MAKE POST</b>") + "\n\nApni post ka text/caption bhejein.")
+
+@router.message(StateFilter(None), F.text == "📚 MY POSTS")
+async def reply_posts(message: Message):
+    user = await store.load_user(message.from_user.id)
+    await message.answer(deco(f"<b>MY POSTS</b>\n\nSaved posts: {len(user.get('posts', []))}"), reply_markup=reply_menu(message.from_user.id in OWNER_IDS))
+
+@router.message(StateFilter(None), F.text == "🎨 EMOJI EXTRACTOR")
+async def reply_extract(message: Message):
+    await message.answer(deco("<b>EMOJI EXTRACTOR</b>\n\nPremium emoji wala message forward karein."), reply_markup=reply_menu(message.from_user.id in OWNER_IDS))
+
+@router.message(StateFilter(None), F.text.in_({"🆘 HELP", "ℹ️ ABOUT BOT"}))
+async def reply_help(message: Message):
+    await message.answer(deco("<b>HELP</b>\n\nMake Post → media → button → design → preview → publish."), reply_markup=reply_menu(message.from_user.id in OWNER_IDS))
+
+@router.message(StateFilter(None), F.text == "📊 STATS")
+async def reply_stats(message: Message):
+    if message.from_user.id not in OWNER_IDS: return
+    files = list((ROOT / "data_cache").glob("*.json")); users = posts = 0
+    for file in files:
+        try:
+            data = json.loads(file.read_text(encoding="utf-8")); users += 1; posts += len(data.get("posts", []))
+        except Exception: pass
+    await message.answer(deco(f"<b>BOT STATS</b>\n\nUsers: {users}\nPosts: {posts}\nEmoji pool: {len(store.emoji_ids)}"), reply_markup=reply_menu(True))
+
+@router.message(StateFilter(None), F.text == "📣 BROADCAST")
+async def reply_broadcast(message: Message, state: FSMContext):
+    if message.from_user.id not in OWNER_IDS: return
+    await state.set_state(OwnerFlow.broadcast)
+    await message.answer("Broadcast message bhejein.")
 
 @router.callback_query(F.data == "verify")
 async def verify(call: CallbackQuery, bot: Bot):
@@ -176,12 +220,19 @@ async def design(call: CallbackQuery, state: FSMContext):
 
 KEYWORDS = {"warning": ["warning", "alert", "danger", "caution"], "tech": ["code", "python", "bot", "api", "tech"], "offer": ["offer", "sale", "free", "deal", "price"], "news": ["news", "update", "announcement"], "gaming": ["game", "gaming", "play"], "hacker": ["hack", "security", "cyber", "terminal"]}
 SAFE_FALLBACKS = ["🔥", "⚡", "🚀", "💎", "🌟", "🛡️", "🎯", "🧿", "🛰️", "💠"]
+OLD_EMOJI_RE = re.compile(r"[\U0001F1E0-\U0001FAFF\U00002600-\U000027BF\u200d\ufe0f]+")
 
 def split_title_body(text: str) -> tuple[str, str]:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    lines = [OLD_EMOJI_RE.sub("", line).strip() for line in text.splitlines() if OLD_EMOJI_RE.sub("", line).strip()]
     if not lines:
         return "Untitled Post", ""
     return lines[0][:96], "\n".join(lines[1:]) or lines[0]
+
+def dense_lines(body: str, marks: list[str]) -> str:
+    lines = [OLD_EMOJI_RE.sub("", line).strip() for line in body.splitlines() if OLD_EMOJI_RE.sub("", line).strip()]
+    if not lines:
+        lines = [" "]
+    return "\n".join(f"{marks[i % len(marks)]} <b>{html.escape(line)}</b> {marks[(i + 1) % len(marks)]}" for i, line in enumerate(lines))
 
 def decorate_text(text: str, style: str, refresh: int = 0) -> str:
     low = text.lower(); category = "general"
@@ -194,12 +245,12 @@ def decorate_text(text: str, style: str, refresh: int = 0) -> str:
         chosen.append(pool[len(chosen) % len(pool)])
     marks = [em(x, SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)]) for i, x in enumerate(chosen)]
     title, body = split_title_body(text)
-    safe_title, safe_body = html.escape(title), html.escape(body)
+    safe_title, line_body = html.escape(title), dense_lines(body, marks)
     if style == "terminal":
-        return "<pre>╭─[ " + safe_title + " ]\n│ " + marks[0] + " STATUS: ONLINE\n│ " + marks[1] + " MODE: " + category.upper() + "\n╰─$ " + safe_body + "</pre>\n" + " ".join(marks[2:5])
+        return "<pre>╭─[ " + safe_title + " ]\n│ STATUS: ONLINE\n│ MODE: " + category.upper() + "\n╰─$</pre>\n" + line_body + "\n" + " ".join(marks[2:5])
     if style == "hacker":
-        return "╔══════════════════════╗\n" + marks[0] + " <b>" + safe_title + "</b> " + marks[1] + "\n╠─ " + marks[2] + " SIGNAL: ACTIVE\n╠─ " + marks[3] + " NODE: " + category.upper() + "\n╠─ " + marks[4] + " LOADING COMPLETE\n╠══════════════════════╣\n" + safe_body + "\n╚══════════════════════╝\n" + " ".join(marks[5:])
-    return "╭━━━━━━━━━━━━━━━━━━━━╮\n" + marks[0] + " <b>" + safe_title + "</b> " + marks[1] + "\n╰━━━━━━━━━━━━━━━━━━━━╯\n\n" + safe_body + "\n\n" + marks[2] + "  " + marks[3] + "  " + marks[4] + "\n╭━━━━━━━━━━━━━━━━━━━━╮\n" + marks[5] + "  " + marks[6] + "\n╰━━━━━━━━━━━━━━━━━━━━╯"
+        return "╔══════════════════════╗\n" + marks[0] + " <b>" + safe_title + "</b> " + marks[1] + "\n╠─ " + marks[2] + " SIGNAL: ACTIVE\n╠─ " + marks[3] + " NODE: " + category.upper() + "\n╠─ " + marks[4] + " LOADING COMPLETE\n╠══════════════════════╣\n" + line_body + "\n╚══════════════════════╝\n" + " ".join(marks[5:])
+    return "╭━━━━━━━━━━━━━━━━━━━━╮\n" + marks[0] + " <b>" + safe_title + "</b> " + marks[1] + "\n╰━━━━━━━━━━━━━━━━━━━━╯\n\n" + line_body + "\n\n" + marks[2] + "  " + marks[3] + "  " + marks[4] + "\n╭━━━━━━━━━━━━━━━━━━━━╮\n" + marks[5] + "  " + marks[6] + "\n╰━━━━━━━━━━━━━━━━━━━━╯"
 
 async def show_preview(message: Message, state: FSMContext):
     data = await state.get_data(); refresh = data.get("refresh", 0); rendered = decorate_text(data.get("text", ""), data.get("design", "card"), refresh)
@@ -218,7 +269,7 @@ async def refresh(call: CallbackQuery, state: FSMContext): data=await state.get_
 async def change_design(call: CallbackQuery, state: FSMContext): await choose_design(call.message, state)
 @router.callback_query(Wizard.preview, F.data == "done")
 async def done(call: CallbackQuery, state: FSMContext):
-    data=await state.get_data(); user=await store.load_user(call.from_user.id); user.setdefault("posts", []).append({"text":data.get("text"),"created_at":datetime.now(timezone.utc).isoformat()}); await store.save_user(call.from_user.id,user); await state.clear(); await call.message.answer(deco("<b>POST READY</b>")+"\n\nSirf aapka original text history mein save hua hai.", reply_markup=main_kb(call.from_user.id in OWNER_IDS))
+    data=await state.get_data(); user=await store.load_user(call.from_user.id); user.setdefault("posts", []).append({"text":data.get("text"),"created_at":datetime.now(timezone.utc).isoformat()}); await store.save_user(call.from_user.id,user); await state.clear(); await call.message.answer(deco("<b>POST READY</b>")+"\n\nSirf aapka original text history mein save hua hai.", reply_markup=reply_menu(call.from_user.id in OWNER_IDS))
 
 @router.callback_query(Wizard.preview, F.data == "publish")
 async def publish_start(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.destinations); await call.message.answer(deco("<b>MULTI-PUBLISH</b>") + "\n\nEk hi message mein channel/group links ya private chat IDs bhejein. Bot sab detect karega.\n\nPrivate destination ke liye pehle bot ko admin banayein. Har destination new line par dena behtar hai.", reply_markup=kb([[button("Cancel", "cancel", "danger")]]))
@@ -273,7 +324,7 @@ async def publish_destinations(message: Message, state: FSMContext, bot: Bot):
     await message.answer(deco("<b>PUBLISH REPORT</b>")+"\n\n"+("\n".join(results) if results else "Koi valid link/ID detect nahi hua.")); await state.clear()
 
 @router.callback_query(F.data == "cancel")
-async def cancel(call: CallbackQuery, state: FSMContext): await state.clear(); await call.message.answer(deco("Draft deleted."), reply_markup=main_kb(call.from_user.id in OWNER_IDS))
+async def cancel(call: CallbackQuery, state: FSMContext): await state.clear(); await call.message.answer(deco("Draft deleted."), reply_markup=reply_menu(call.from_user.id in OWNER_IDS))
 
 @router.callback_query(F.data == "owner")
 async def owner_panel(call: CallbackQuery):
