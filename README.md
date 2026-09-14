@@ -19,18 +19,17 @@ There is no SQLite database. The bot keeps a small local JSON cache for fast ope
    pip install -r requirements.txt
    ```
 
-2. Edit `config.py` and put the BotFather token in `BOT_TOKEN`.
-3. Edit `config.json` and set `github_repo` to `OWNER/REPOSITORY`.
-4. Set the GitHub token as an environment variable; do not commit it:
+2. Edit the single `config.py` file and set `BOT_TOKEN`, `DATA_REPO`, `DATA_BRANCH`, data paths, owners, and required destinations.
+3. In Railway Variables, set only the GitHub token; do not commit it:
 
    ```bash
    export GITHUB_TOKEN='github_pat_...'
    ```
 
-   The token needs repository Contents read/write permission for the selected repository. Optional overrides are `GITHUB_REPO` and `GITHUB_BRANCH`.
+   The token needs repository Contents read/write permission for the configured data repository.
 
-5. Add the bot to every required channel/group. For membership checks and publishing, grant administrator permissions where required. Private destinations must be added first and then supplied as chat IDs.
-6. Run:
+4. Add the bot to every required channel/group. For membership checks and publishing, grant administrator permissions where required. Private destinations must be added first and then supplied as chat IDs.
+5. Run:
 
    ```bash
    python bot.py

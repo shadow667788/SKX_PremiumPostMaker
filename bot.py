@@ -21,12 +21,11 @@ import config as pyconfig
 from github_store import GitHubJSONStore
 
 ROOT = Path(__file__).parent
-JSON_CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 TOKEN = pyconfig.BOT_TOKEN
-OWNER_IDS = set(JSON_CONFIG.get("owner_ids", pyconfig.OWNER_IDS))
-REQUIRED = JSON_CONFIG.get("required_channels", pyconfig.REQUIRED_CHANNELS)
-PRIVATE_REQUIRED = JSON_CONFIG.get("required_private_chat_id", pyconfig.REQUIRED_PRIVATE_CHAT_ID)
-BRAND = JSON_CONFIG.get("bot_name", pyconfig.BRAND)
+OWNER_IDS = set(pyconfig.OWNER_IDS)
+REQUIRED = pyconfig.REQUIRED_CHANNELS
+PRIVATE_REQUIRED = pyconfig.REQUIRED_PRIVATE_CHAT_ID
+BRAND = pyconfig.BRAND
 store = GitHubJSONStore()
 router = Router()
 
