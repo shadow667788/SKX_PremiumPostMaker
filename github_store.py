@@ -8,7 +8,7 @@ from typing import Any
 
 import aiohttp
 
-from config import DB_PATH
+from config import DB_PATH, GITHUB_BRANCH, GITHUB_REPO, GITHUB_TOKEN
 from emoji_pools import PREMIUM_EMOJI_IDS
 
 CACHE_DIR = DB_PATH.parent / "data_cache"
@@ -17,11 +17,11 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 class GitHubJSONStore:
     def __init__(self) -> None:
-        self.token = os.getenv("GITHUB_TOKEN", "")
+        self.token = GITHUB_TOKEN
         config_path = DB_PATH.parent / "config.json"
         file_config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
-        self.repo = os.getenv("GITHUB_REPO", file_config.get("github_repo", ""))  # owner/repository
-        self.branch = os.getenv("GITHUB_BRANCH", file_config.get("github_branch", "main"))
+        self.repo = GITHUB_REPO or file_config.get("github_repo", "")  # owner/repository
+        self.branch = GITHUB_BRANCH or file_config.get("github_branch", "main")
         self.base = "https://api.github.com"
         self._lock = asyncio.Lock()
         self.emoji_ids = list(PREMIUM_EMOJI_IDS)

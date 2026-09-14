@@ -1,5 +1,8 @@
 {
+  "bot_token_env": "BOT_TOKEN",
+  "github_token_env": "GITHUB_TOKEN",
   "github_repo": "shadow667788/PremiumPostMakerData",
+  "github_repo_env_override": "GITHUB_REPO",
   "github_branch": "main",
   "required_channels": [
     "@itxtalhabrand",
