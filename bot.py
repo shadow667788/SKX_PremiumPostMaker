@@ -45,6 +45,7 @@ def em(user_id: str | int, fallback: str = "✦") -> str:
 
 def deco(text: str, count: int = 2) -> str:
     pool = store.emoji_ids or ["5449569374065152798"]
+    count = max(count, 3)
     return " ".join(em(x, SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)]) for i, x in enumerate(random.sample(pool, min(count, len(pool))))) + " " + text
 
 def icon_for(label: str, explicit: str | None = None) -> str | None:
@@ -247,10 +248,12 @@ def decorate_text(text: str, style: str, refresh: int = 0) -> str:
     title, body = split_title_body(text)
     safe_title, line_body = html.escape(title), dense_lines(body, marks)
     if style == "terminal":
-        return "<pre>╭─[ " + safe_title + " ]\n│ STATUS: ONLINE\n│ MODE: " + category.upper() + "\n╰─$</pre>\n" + line_body + "\n" + " ".join(marks[2:5])
+        plain_lines = [OLD_EMOJI_RE.sub("", line).strip() for line in body.splitlines() if OLD_EMOJI_RE.sub("", line).strip()] or [" "]
+        terminal_body = "\n".join("│ " + html.escape(line) for line in plain_lines)
+        return "<pre>┌────────────────────────┐\n│  " + safe_title + "\n├────────────────────────┤\n│  STATUS : ONLINE\n│  MODE   : " + category.upper() + "\n├────────────────────────┤\n" + terminal_body + "\n└─$ _</pre>\n" + " ".join(marks)
     if style == "hacker":
-        return "╔══════════════════════╗\n" + marks[0] + " <b>" + safe_title + "</b> " + marks[1] + "\n╠─ " + marks[2] + " SIGNAL: ACTIVE\n╠─ " + marks[3] + " NODE: " + category.upper() + "\n╠─ " + marks[4] + " LOADING COMPLETE\n╠══════════════════════╣\n" + line_body + "\n╚══════════════════════╝\n" + " ".join(marks[5:])
-    return "╭━━━━━━━━━━━━━━━━━━━━╮\n" + marks[0] + " <b>" + safe_title + "</b> " + marks[1] + "\n╰━━━━━━━━━━━━━━━━━━━━╯\n\n" + line_body + "\n\n" + marks[2] + "  " + marks[3] + "  " + marks[4] + "\n╭━━━━━━━━━━━━━━━━━━━━╮\n" + marks[5] + "  " + marks[6] + "\n╰━━━━━━━━━━━━━━━━━━━━╯"
+        return "<pre>╔════[ ENCRYPTED CHANNEL ]════╗\n║ " + safe_title + "\n╠══ SIGNAL : ████████ 100%\n║  NODE   : " + category.upper() + "\n║  ACCESS : GRANTED\n╠═════════════════════════════╣</pre>\n" + line_body + "\n<pre>╚════[ TRANSMISSION CLOSED ]══╝</pre>\n" + " ".join(marks)
+    return "╭━━━━━━━━━━━━━━━━━━━━━━━━╮\n" + marks[0] + "  <b>" + safe_title + "</b>  " + marks[1] + "\n╰━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n" + line_body + "\n\n╭─ ✦ ─ ✦ ─ ✦ ─ ✦ ─ ✦ ─╮\n" + "  ".join(marks[2:]) + "\n╰━━━━━━━━━━━━━━━━━━━━━━━━╯"
 
 async def show_preview(message: Message, state: FSMContext):
     data = await state.get_data(); refresh = data.get("refresh", 0); rendered = decorate_text(data.get("text", ""), data.get("design", "card"), refresh)
@@ -263,13 +266,32 @@ async def show_preview(message: Message, state: FSMContext):
     else: await message.answer(rendered, reply_markup=markup)
     await state.set_state(Wizard.preview)
 
+async def send_final_post(message: Message, data: dict) -> None:
+    rendered = decorate_text(data.get("text", ""), data.get("design", "card"), data.get("refresh", 0))
+    markup = None
+    if data.get("button_name") and data.get("button_url"):
+        # Inline buttons support Telegram's primary/success/danger styles.
+        markup = kb([[url_button(data["button_name"], data["button_url"], "success")]])
+    if data.get("media_type") == "photo":
+        await message.answer_photo(data["media_id"], caption=rendered, reply_markup=markup)
+    elif data.get("media_type") == "video":
+        await message.answer_video(data["media_id"], caption=rendered, reply_markup=markup)
+    else:
+        await message.answer(rendered, reply_markup=markup)
+
 @router.callback_query(Wizard.preview, F.data == "refresh")
 async def refresh(call: CallbackQuery, state: FSMContext): data=await state.get_data(); await state.update_data(refresh=data.get("refresh",0)+1); await call.message.delete(); await show_preview(call.message, state)
 @router.callback_query(Wizard.preview, F.data == "change_design")
 async def change_design(call: CallbackQuery, state: FSMContext): await choose_design(call.message, state)
 @router.callback_query(Wizard.preview, F.data == "done")
 async def done(call: CallbackQuery, state: FSMContext):
-    data=await state.get_data(); user=await store.load_user(call.from_user.id); user.setdefault("posts", []).append({"text":data.get("text"),"created_at":datetime.now(timezone.utc).isoformat()}); await store.save_user(call.from_user.id,user); await state.clear(); await call.message.answer(deco("<b>POST READY</b>")+"\n\nSirf aapka original text history mein save hua hai.", reply_markup=reply_menu(call.from_user.id in OWNER_IDS))
+    data = await state.get_data()
+    user = await store.load_user(call.from_user.id)
+    user.setdefault("posts", []).append({"text": data.get("text"), "created_at": datetime.now(timezone.utc).isoformat()})
+    await store.save_user(call.from_user.id, user)
+    await send_final_post(call.message, data)
+    await state.clear()
+    await call.message.answer(deco("<b>POST READY</b>") + "\n\nAapki final post inbox mein deliver kar di gayi hai.", reply_markup=reply_menu(call.from_user.id in OWNER_IDS))
 
 @router.callback_query(Wizard.preview, F.data == "publish")
 async def publish_start(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.destinations); await call.message.answer(deco("<b>MULTI-PUBLISH</b>") + "\n\nEk hi message mein channel/group links ya private chat IDs bhejein. Bot sab detect karega.\n\nPrivate destination ke liye pehle bot ko admin banayein. Har destination new line par dena behtar hai.", reply_markup=kb([[button("Cancel", "cancel", "danger")]]))

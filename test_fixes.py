@@ -7,4 +7,12 @@ bot.VALID_CUSTOM_EMOJI_IDS = {'1234567890123456789'}
 bot.CUSTOM_EMOJI_FALLBACKS = {'1234567890123456789': '🔥'}
 assert bot.em('1234567890123456789') == '<tg-emoji emoji-id="1234567890123456789">🔥</tg-emoji>'
 assert bot.em('9999999999999999999') == '✦'
+menu = bot.reply_menu(False)
+assert len(menu.keyboard) == 3
+assert menu.keyboard[0][0].text == '🔥 MAKE POST'
+rendered = bot.decorate_text('🔥 My Title 🚀\n😀 First line\nSecond line 💎', 'card', 1)
+assert '😀' not in rendered
+assert 'My Title' in rendered and 'First line' in rendered and 'Second line' in rendered
+assert 'STATUS' in bot.decorate_text('Title\nBody', 'terminal', 2)
+assert 'ENCRYPTED CHANNEL' in bot.decorate_text('Title\nBody', 'hacker', 2)
 print('fix tests passed')
