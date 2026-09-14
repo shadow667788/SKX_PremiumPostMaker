@@ -272,11 +272,11 @@ async def send_final_post(message: Message, data: dict) -> None:
         # Inline buttons support Telegram's primary/success/danger styles.
         markup = kb([[url_button(data["button_name"], data["button_url"], "success")]])
     if data.get("media_type") == "photo":
-        await message.answer_photo(data["media_id"], caption=rendered, reply_markup=markup)
+        await message.answer_photo(data["media_id"], caption=rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
     elif data.get("media_type") == "video":
-        await message.answer_video(data["media_id"], caption=rendered, reply_markup=markup)
+        await message.answer_video(data["media_id"], caption=rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
     else:
-        await message.answer(rendered, reply_markup=markup)
+        await message.answer(rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 @router.callback_query(Wizard.preview, F.data == "refresh")
 async def refresh(call: CallbackQuery, state: FSMContext): data=await state.get_data(); await state.update_data(refresh=data.get("refresh",0)+1); await call.message.delete(); await show_preview(call.message, state)
@@ -333,9 +333,9 @@ async def publish_destinations(message: Message, state: FSMContext, bot: Bot):
             if member.status not in {"administrator","creator"}: results.append(f"❌ {target}: Bot ko admin karein"); continue
             markup=None
             if data.get("button_name") and data.get("button_url"): markup=kb([[url_button(data["button_name"], data["button_url"], "primary")]])
-            if data.get("media_type")=="photo": await bot.send_photo(resolved_chat,data["media_id"],caption=rendered,reply_markup=markup)
-            elif data.get("media_type")=="video": await bot.send_video(resolved_chat,data["media_id"],caption=rendered,reply_markup=markup)
-            else: await bot.send_message(resolved_chat,rendered,reply_markup=markup)
+            if data.get("media_type")=="photo": await bot.send_photo(resolved_chat,data["media_id"],caption=rendered,parse_mode=ParseMode.HTML,reply_markup=markup)
+            elif data.get("media_type")=="video": await bot.send_video(resolved_chat,data["media_id"],caption=rendered,parse_mode=ParseMode.HTML,reply_markup=markup)
+            else: await bot.send_message(resolved_chat,rendered,parse_mode=ParseMode.HTML,reply_markup=markup)
             results.append(f"✅ {target}: Published")
         except Exception as exc: results.append(f"❌ {target}: {str(exc)[:80]}")
     user = await store.load_user(message.from_user.id)
