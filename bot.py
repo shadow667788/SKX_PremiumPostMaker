@@ -74,12 +74,10 @@ def main_kb(owner: bool = False) -> InlineKeyboardMarkup:
         [button("🔥 MAKE POST", "make", "danger"), button("🎨 EMOJI EXTRACTOR", "extract", "danger")],
     ]
     if owner:
-        rows.append([button("📣 BROADCAST", "obroadcast", "success"), button("📚 MY POSTS", "posts", "primary")])
+        rows.append([button("🔐 OWNER PANEL", "owner", "danger"), button("📚 MY POSTS", "posts", "primary")])
     else:
         rows.append([button("📚 MY POSTS", "posts", "primary")])
     rows.append([button("🆘 HELP", "help", "danger"), button("ℹ️ ABOUT BOT", "help", "success")])
-    if owner:
-        rows.append([button("📊 STATS", "ostats", "danger")])
     return kb(rows)
 
 def reply_menu(owner: bool = False) -> ReplyKeyboardMarkup:
@@ -114,7 +112,7 @@ async def membership_screen(bot: Bot, user_id: int) -> tuple[bool, str]:
 class Wizard(StatesGroup):
     text = State(); media = State(); photo = State(); video = State(); button_choice = State(); button_name = State(); button_url = State(); design = State(); preview = State(); destinations = State()
 class OwnerFlow(StatesGroup):
-    add_emojis = State(); broadcast = State(); add_owner = State(); remove_owner = State()
+    add_emojis = State(); broadcast = State(); broadcast_all = State(); broadcast_users = State(); broadcast_channels = State(); add_owner = State(); remove_owner = State()
 
 
 async def welcome(message: Message, bot: Bot) -> None:
@@ -240,9 +238,6 @@ def dense_lines(body: str, marks: list[str]) -> str:
     return "\n".join(f"{marks[i % len(marks)]} <b>{html.escape(line)}</b> {marks[(i + 1) % len(marks)]}" for i, line in enumerate(lines))
 
 def decorate_text(text: str, style: str, refresh: int = 0) -> str:
-    low = text.lower(); category = "general"
-    for key, words in KEYWORDS.items():
-        if any(w in low for w in words): category = key; break
     pool = store.emoji_ids or ["5449569374065152798"]
     random.seed(f"{text}:{style}:{refresh}")
     chosen = random.sample(pool, min(7, len(pool)))
@@ -254,9 +249,9 @@ def decorate_text(text: str, style: str, refresh: int = 0) -> str:
     if style == "terminal":
         plain_lines = [OLD_EMOJI_RE.sub("", line).strip() for line in body.splitlines() if OLD_EMOJI_RE.sub("", line).strip()] or [" "]
         terminal_body = "\n".join("│ " + html.escape(line) for line in plain_lines)
-        return "<pre>┌────────────────────────┐\n│  " + safe_title + "\n├────────────────────────┤\n│  STATUS : ONLINE\n│  MODE   : " + category.upper() + "\n├────────────────────────┤\n" + terminal_body + "\n└─$ _</pre>\n" + " ".join(marks)
+        return "<pre>┌────────────────────────┐\n│  " + safe_title + "\n├────────────────────────┤\n" + terminal_body + "\n└─$ _</pre>\n" + " ".join(marks)
     if style == "hacker":
-        return "<pre>╔════[ ENCRYPTED CHANNEL ]════╗\n║ " + safe_title + "\n╠══ SIGNAL : ████████ 100%\n║  NODE   : " + category.upper() + "\n║  ACCESS : GRANTED\n╠═════════════════════════════╣</pre>\n" + line_body + "\n<pre>╚════[ TRANSMISSION CLOSED ]══╝</pre>\n" + " ".join(marks)
+        return "<pre>╔══════════════════════════╗\n║  " + safe_title + "\n╠══ ████████████ 100% ════╣</pre>\n" + line_body + "\n<pre>╚══════════════════════════╝</pre>\n" + " ".join(marks)
     return "╭━━━━━━━━━━━━━━━━━━━━━━━━╮\n" + marks[0] + "  <b>" + safe_title + "</b>  " + marks[1] + "\n╰━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n" + line_body + "\n\n╭─ ✦ ─ ✦ ─ ✦ ─ ✦ ─ ✦ ─╮\n" + "  ".join(marks[2:]) + "\n╰━━━━━━━━━━━━━━━━━━━━━━━━╯"
 
 async def show_preview(message: Message, state: FSMContext):
@@ -355,7 +350,13 @@ async def cancel(call: CallbackQuery, state: FSMContext): await state.clear(); a
 @router.callback_query(F.data == "owner")
 async def owner_panel(call: CallbackQuery):
     if call.from_user.id not in OWNER_IDS: await call.answer("Access denied", show_alert=True); return
-    await call.message.edit_text(deco("<b>OWNER CONTROL CENTER</b>") + "\n\nSecure administration tools.", reply_markup=kb([[button("Broadcast", "obroadcast", "danger"), button("Stats", "ostats", "primary")],[button("Add Emoji IDs", "oemoji", "success")],[button("Add Owner", "oadd", "primary"),button("Remove Owner", "oremove", "danger")],[button("Back", "back", "primary")]]))
+    await call.message.edit_text(deco("<b>OWNER CONTROL CENTER</b>") + "\n\nSecure administration tools.", reply_markup=kb([
+        [button("➕ ADD EMOJIS", "oemoji", "success")],
+        [button("➕ ADD OWNER", "oadd", "primary"), button("➖ REMOVE OWNER", "oremove", "danger")],
+        [button("📣 BROADCAST ALL", "ob_all", "danger")],
+        [button("👤 BROADCAST USERS", "ob_users", "primary"), button("📡 BROADCAST CHANNELS", "ob_channels", "success")],
+        [button("📊 BOT STATISTICS", "ostats", "primary"), button("🗂 CHANNEL/GROUP LIST", "ochats", "success")],
+        [button("⬅ BACK", "back", "danger")]]))
 
 @router.callback_query(F.data == "ostats")
 async def ostats(call: CallbackQuery):
@@ -367,6 +368,16 @@ async def ostats(call: CallbackQuery):
             data = json.loads(file.read_text(encoding="utf-8")); users += 1; posts += len(data.get("posts", [])); destinations += len(data.get("destinations", []))
         except Exception: pass
     await call.message.answer(deco(f"<b>BOT STATS</b>\n\nUsers: {users}\nPosts: {posts}\nRegistered destinations: {destinations}\nEmoji pool: {len(store.emoji_ids)}"), reply_markup=main_kb(True))
+
+@router.callback_query(F.data == "ochats")
+async def ochats(call: CallbackQuery):
+    if call.from_user.id not in OWNER_IDS: return
+    destinations: set[str] = set()
+    for file in (ROOT / "data_cache").glob("*.json"):
+        try: destinations.update(json.loads(file.read_text(encoding="utf-8")).get("destinations", []))
+        except Exception: pass
+    listed = "\n".join(f"• {x}" for x in sorted(destinations)) or "Abhi koi verified channel/group nahi hai."
+    await call.message.answer(deco("<b>CHANNEL / GROUP LIST</b>\n\n") + listed, reply_markup=kb([[button("⬅ OWNER PANEL", "owner", "danger")]]))
 @router.callback_query(F.data == "oemoji")
 async def oemoji(call: CallbackQuery, state: FSMContext):
     if call.from_user.id not in OWNER_IDS: return
@@ -400,27 +411,43 @@ async def remove_owner(message: Message, state: FSMContext):
 @router.callback_query(F.data == "obroadcast")
 async def obroadcast(call: CallbackQuery, state: FSMContext):
     if call.from_user.id not in OWNER_IDS:return
-    await state.set_state(OwnerFlow.broadcast); await call.message.answer("Broadcast message bhejein. Yeh registered user files ke users ko DM karega; channel broadcast ke liye destination IDs wali list paste karein.")
+    await state.update_data(broadcast_mode="all"); await state.set_state(OwnerFlow.broadcast_all); await call.message.answer("Broadcast message bhejein. Yeh users aur registered channels/groups dono ko jayega.")
+
+@router.callback_query(F.data.in_({"ob_all", "ob_users", "ob_channels"}))
+async def broadcast_mode(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id not in OWNER_IDS: return
+    mode = {"ob_all": "all", "ob_users": "users", "ob_channels": "channels"}[call.data]
+    target_state = {"all": OwnerFlow.broadcast_all, "users": OwnerFlow.broadcast_users, "channels": OwnerFlow.broadcast_channels}[mode]
+    await state.update_data(broadcast_mode=mode); await state.set_state(target_state)
+    prompt = {"all": "users aur channels/groups", "users": "sirf users", "channels": "sirf registered channels/groups"}[mode]
+    await call.message.answer(f"Broadcast message bhejein — yeh {prompt} ko jayega.")
+
 @router.message(OwnerFlow.broadcast)
+@router.message(OwnerFlow.broadcast_all)
+@router.message(OwnerFlow.broadcast_users)
+@router.message(OwnerFlow.broadcast_channels)
 async def broadcast(message: Message, state: FSMContext, bot: Bot):
     if message.from_user.id not in OWNER_IDS:return
+    mode = (await state.get_data()).get("broadcast_mode", "all")
     cache=list((ROOT/"data_cache").glob("*.json")); sent=0
     channel_sent = 0
     destinations = set()
     for file in cache:
         try:
-            data=json.loads(file.read_text()); uid=int(file.stem); await bot.copy_message(uid,message.chat.id,message.message_id); sent+=1
-            destinations.update(data.get("destinations", []))
+            data=json.loads(file.read_text()); uid=int(file.stem); destinations.update(data.get("destinations", []))
+            if mode in {"all", "users"}:
+                await bot.copy_message(uid,message.chat.id,message.message_id); sent+=1
         except Exception: pass
-    for target in destinations:
-        try:
-            chat = int(target) if str(target).startswith("-100") else target
-            resolved = (await bot.get_chat(chat_id=chat)).id
-            member = await bot.get_chat_member(resolved, (await bot.get_me()).id)
-            if member.status in {"administrator", "creator"}:
-                await bot.copy_message(resolved, message.chat.id, message.message_id); channel_sent += 1
-        except Exception: pass
-    await state.clear(); await message.answer(deco(f"Broadcast complete. DM sent: {sent}\nChannel/group sent: {channel_sent}"),reply_markup=main_kb(True))
+    if mode in {"all", "channels"}:
+        for target in destinations:
+            try:
+                chat = int(target) if str(target).startswith("-100") else target
+                resolved = (await bot.get_chat(chat_id=chat)).id
+                member = await bot.get_chat_member(resolved, (await bot.get_me()).id)
+                if member.status in {"administrator", "creator"}:
+                    await bot.copy_message(resolved, message.chat.id, message.message_id); channel_sent += 1
+            except Exception: pass
+    await state.clear(); await message.answer(deco(f"Broadcast complete. Mode: {mode}\nDM sent: {sent}\nChannel/group sent: {channel_sent}"),reply_markup=main_kb(True))
 
 @router.callback_query(F.data == "posts")
 async def posts(call: CallbackQuery):
