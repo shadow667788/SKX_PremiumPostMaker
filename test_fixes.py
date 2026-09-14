@@ -8,14 +8,14 @@ bot.CUSTOM_EMOJI_FALLBACKS = {'1234567890123456789': '🔥'}
 assert bot.em('1234567890123456789') == '<tg-emoji emoji-id="1234567890123456789">🔥</tg-emoji>'
 assert bot.em('9999999999999999999') == '✦'
 menu = bot.reply_menu(False)
-assert len(menu.keyboard) == 3
+assert len(menu.keyboard) == 4
 assert menu.keyboard[0][0].text == '🔥 MAKE POST'
 inline = bot.main_kb(True)
-assert len(inline.inline_keyboard) == 3
+assert len(inline.inline_keyboard) == 4
 assert inline.inline_keyboard[0][0].callback_data == 'make'
-assert inline.inline_keyboard[1][0].callback_data == 'owner'
+assert inline.inline_keyboard[1][0].callback_data == 'channel_manager'
 assert inline.inline_keyboard[0][0].style == 'danger'
-assert inline.inline_keyboard[1][0].style == 'danger'
+assert inline.inline_keyboard[1][0].style == 'success'
 rendered = bot.decorate_text('🔥 My Title 🚀\n😀 First line\nSecond line 💎', 'card', 1)
 assert '😀' not in rendered
 assert 'My Title' in rendered and 'First line' in rendered and 'Second line' in rendered

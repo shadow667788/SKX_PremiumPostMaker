@@ -9,7 +9,7 @@ from typing import Any
 
 import aiohttp
 
-from config import DATA_BRANCH, DATA_REPO, DB_PATH, GITHUB_TOKEN_ENV_NAME, META_DATA_PATH, USER_DATA_PATH
+from config import DATA_BRANCH, DATA_REPO, DB_PATH, EMOJI_POOL_VERSION, GITHUB_TOKEN_ENV_NAME, META_DATA_PATH, USER_DATA_PATH
 from emoji_pools import PREMIUM_EMOJI_IDS
 
 CACHE_DIR = DB_PATH.parent / "data_cache"
@@ -67,22 +67,28 @@ class GitHubJSONStore:
         local = self._path("meta.json")
         remote = await self._get_file(META_DATA_PATH) if self.enabled else None
         if remote:
-            self.emoji_ids = remote["value"].get("emoji_ids", self.emoji_ids)
-            local.write_text(json.dumps(remote["value"], ensure_ascii=False, indent=2), encoding="utf-8")
+            remote_value = remote["value"]
+            if remote_value.get("emoji_pool_version") != EMOJI_POOL_VERSION:
+                self.emoji_ids = list(PREMIUM_EMOJI_IDS)
+                remote_value = {"emoji_ids": self.emoji_ids, "owner_ids": remote_value.get("owner_ids", []), "emoji_pool_version": EMOJI_POOL_VERSION}
+                await self._put_file(META_DATA_PATH, remote_value, remote.get("sha"))
+            else:
+                self.emoji_ids = remote_value.get("emoji_ids", self.emoji_ids)
+            local.write_text(json.dumps(remote_value, ensure_ascii=False, indent=2), encoding="utf-8")
         elif local.exists():
             try:
                 self.emoji_ids = json.loads(local.read_text(encoding="utf-8")).get("emoji_ids", self.emoji_ids)
             except Exception:
                 pass
         if self.enabled and not remote:
-            await self._put_file(META_DATA_PATH, {"emoji_ids": self.emoji_ids, "owner_ids": [], "version": 1})
+            await self._put_file(META_DATA_PATH, {"emoji_ids": self.emoji_ids, "owner_ids": [], "emoji_pool_version": EMOJI_POOL_VERSION})
 
     async def load_meta(self) -> dict[str, Any]:
         remote = await self._get_file(META_DATA_PATH) if self.enabled else None
         if remote:
             return remote["value"]
         local = self._path("meta.json")
-        return json.loads(local.read_text(encoding="utf-8")) if local.exists() else {"emoji_ids": self.emoji_ids, "owner_ids": []}
+        return json.loads(local.read_text(encoding="utf-8")) if local.exists() else {"emoji_ids": self.emoji_ids, "owner_ids": [], "emoji_pool_version": EMOJI_POOL_VERSION}
 
     async def save_owner_ids(self, owner_ids: set[int]) -> None:
         meta = await self.load_meta()
@@ -113,7 +119,7 @@ class GitHubJSONStore:
     async def save_emojis(self, ids: list[str]) -> None:
         self.emoji_ids = list(dict.fromkeys(str(x) for x in ids if str(x).isdigit()))
         existing = await self.load_meta()
-        meta = {"emoji_ids": self.emoji_ids, "owner_ids": existing.get("owner_ids", []), "version": 1}
+        meta = {"emoji_ids": self.emoji_ids, "owner_ids": existing.get("owner_ids", []), "emoji_pool_version": EMOJI_POOL_VERSION}
         self._path("meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         if self.enabled:
             async with self._lock:

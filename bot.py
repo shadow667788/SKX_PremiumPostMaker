@@ -72,6 +72,7 @@ def kb(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
 def main_kb(owner: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [button("🔥 MAKE POST", "make", "danger"), button("🎨 EMOJI EXTRACTOR", "extract", "danger")],
+        [button("📡 CHANNEL POST MANAGER", "channel_manager", "success")],
     ]
     if owner:
         rows.append([button("🔐 OWNER PANEL", "owner", "danger"), button("📚 MY POSTS", "posts", "primary")])
@@ -83,6 +84,7 @@ def main_kb(owner: bool = False) -> InlineKeyboardMarkup:
 def reply_menu(owner: bool = False) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text="🔥 MAKE POST"), KeyboardButton(text="🎨 EMOJI EXTRACTOR")],
+        [KeyboardButton(text="📡 CHANNEL POST MANAGER")],
         [KeyboardButton(text="📣 BROADCAST"), KeyboardButton(text="📚 MY POSTS")],
         [KeyboardButton(text="🆘 HELP"), KeyboardButton(text="ℹ️ ABOUT BOT")],
     ]
@@ -113,6 +115,8 @@ class Wizard(StatesGroup):
     text = State(); media = State(); photo = State(); video = State(); button_choice = State(); button_name = State(); button_url = State(); design = State(); preview = State(); destinations = State()
 class OwnerFlow(StatesGroup):
     add_emojis = State(); broadcast = State(); broadcast_all = State(); broadcast_users = State(); broadcast_channels = State(); add_owner = State(); remove_owner = State()
+class ChannelManagerFlow(StatesGroup):
+    add = State(); remove = State(); post = State()
 
 
 async def welcome(message: Message, bot: Bot) -> None:
@@ -141,6 +145,10 @@ async def reply_make(message: Message, state: FSMContext):
 async def reply_posts(message: Message):
     user = await store.load_user(message.from_user.id)
     await message.answer(deco(f"<b>MY POSTS</b>\n\nSaved posts: {len(user.get('posts', []))}"), reply_markup=main_kb(message.from_user.id in OWNER_IDS))
+
+@router.message(StateFilter(None), F.text == "📡 CHANNEL POST MANAGER")
+async def reply_channel_manager(message: Message):
+    await channel_manager_screen(message, message.from_user.id)
 
 @router.message(StateFilter(None), F.text == "🎨 EMOJI EXTRACTOR")
 async def reply_extract(message: Message):
@@ -178,8 +186,71 @@ async def verify(call: CallbackQuery, bot: Bot):
 
 @router.callback_query(F.data == "make")
 async def make(call: CallbackQuery, state: FSMContext):
-    await state.clear(); await state.set_state(Wizard.text)
+    await state.clear(); await state.update_data(channel_manager=False); await state.set_state(Wizard.text)
     await call.message.edit_text(deco("<b>MAKE POST</b>") + "\n\nApni post ka text/caption bhejein.", reply_markup=kb([[button("× Cancel", "cancel", "danger")]]))
+
+async def channel_manager_screen(message: Message, user_id: int) -> None:
+    user = await store.load_user(user_id)
+    destinations = user.get("destinations", [])
+    listed = "\n".join(f"• {x} ✅ Bot admin hai" for x in destinations) or "Abhi koi channel/group add nahi hai."
+    await message.answer(deco("<b>CHANNEL POST MANAGER</b>") + f"\n\nAapke verified channels/groups:\n{listed}\n\nNaya channel add karne ke baad bot ko administrator zaroor banayein.", reply_markup=kb([
+        [button("➕ ADD CHANNEL/GROUP", "cm_add", "success")],
+        [button("➖ REMOVE CHANNEL/GROUP", "cm_remove", "danger")],
+        [button("✍️ CREATE CHANNEL POST", "cm_post", "primary")],
+        [button("⬅ BACK", "back", "danger")]]))
+
+@router.callback_query(F.data == "channel_manager")
+async def channel_manager(call: CallbackQuery):
+    await channel_manager_screen(call.message, call.from_user.id)
+
+@router.callback_query(F.data == "cm_add")
+async def cm_add(call: CallbackQuery, state: FSMContext):
+    await state.set_state(ChannelManagerFlow.add)
+    await call.message.answer("Channel ka @username ya -100... chat ID bhejein. Private invite link ke bajaye chat ID dein.")
+
+@router.message(ChannelManagerFlow.add)
+async def cm_add_save(message: Message, state: FSMContext, bot: Bot):
+    targets = parse_destinations(message.text or "")
+    if not targets or targets[0].startswith("__private_link__:"):
+        await message.answer("Valid public @username ya -100... chat ID bhejein."); return
+    target = targets[0]
+    try:
+        chat = int(target) if target.startswith("-100") else target
+        info = await bot.get_chat(chat_id=chat)
+        me = await bot.get_me(); member = await bot.get_chat_member(info.id, me.id)
+        if member.status not in {"administrator", "creator"}:
+            await message.answer("Pehle is channel/group mein bot ko administrator banayein."); return
+        user = await store.load_user(message.from_user.id)
+        user["destinations"] = list(dict.fromkeys(user.get("destinations", []) + [str(info.id) if str(info.id).startswith("-100") else target]))
+        user.setdefault("history", []).append({"event": "destination_added", "chat_id": str(info.id), "at": datetime.now(timezone.utc).isoformat()})
+        await store.save_user(message.from_user.id, user); await state.clear(); await channel_manager_screen(message, message.from_user.id)
+    except Exception as exc:
+        await message.answer(f"Channel verify nahi hua: {str(exc)[:120]}")
+
+@router.callback_query(F.data == "cm_remove")
+async def cm_remove(call: CallbackQuery, state: FSMContext):
+    await state.set_state(ChannelManagerFlow.remove); await call.message.answer("Remove karne wale channel ka @username ya -100... chat ID bhejein.")
+
+@router.message(ChannelManagerFlow.remove)
+async def cm_remove_save(message: Message, state: FSMContext):
+    targets = parse_destinations(message.text or "")
+    if not targets: await message.answer("Valid channel username ya chat ID bhejein."); return
+    user = await store.load_user(message.from_user.id)
+    before = user.get("destinations", []); user["destinations"] = [x for x in before if x not in targets]
+    await store.save_user(message.from_user.id, user); await state.clear(); await channel_manager_screen(message, message.from_user.id)
+
+@router.callback_query(F.data == "cm_post")
+async def cm_post(call: CallbackQuery, state: FSMContext):
+    user = await store.load_user(call.from_user.id)
+    if not user.get("destinations"):
+        await call.answer("Pehle kam az kam ek channel/group add karein.", show_alert=True); return
+    await state.clear(); await state.update_data(channel_manager=True); await state.set_state(ChannelManagerFlow.post)
+    await call.message.answer(deco("<b>CHANNEL POST</b>") + "\n\nApni post ka text/caption bhejein.")
+
+@router.message(ChannelManagerFlow.post)
+async def cm_post_text(message: Message, state: FSMContext):
+    await state.update_data(text=message.text or message.caption or "", channel_manager=True)
+    await state.set_state(Wizard.media); await message.answer(deco("<b>MEDIA LAYER</b>") + "\n\nPhoto ya video add karni hai?", reply_markup=kb([[button("＋ Add Photo", "add_photo", "success"), button("＋ Add Video", "add_video", "success")], [button("Skip", "media_skip", "primary"), button("Delete", "cancel", "danger")]]))
 
 @router.message(Wizard.text)
 async def post_text(message: Message, state: FSMContext):
@@ -256,7 +327,9 @@ def decorate_text(text: str, style: str, refresh: int = 0) -> str:
 
 async def show_preview(message: Message, state: FSMContext):
     data = await state.get_data(); refresh = data.get("refresh", 0); rendered = decorate_text(data.get("text", ""), data.get("design", "card"), refresh)
-    rows = [[button("↻ Refresh Emoji", "refresh", "primary"), button("Change Design", "change_design", "success")], [button("Delete Post", "cancel", "danger"), button("✓ Done", "done", "success")], [button("Publish this post to my channel", "publish", "primary")]]
+    rows = [[button("↻ Refresh Emoji", "refresh", "primary"), button("Change Design", "change_design", "success")], [button("Delete Post", "cancel", "danger"), button("✓ Done", "done", "success")]]
+    if data.get("channel_manager"):
+        rows.append([button("✅ CONFIRM PUBLISH TO MY CHANNELS", "cm_confirm_publish", "success")])
     if data.get("button_name") and data.get("button_url"):
         rows.insert(0, [url_button(data["button_name"], data["button_url"], "success")])
     markup = kb(rows)
@@ -294,6 +367,25 @@ async def done(call: CallbackQuery, state: FSMContext):
 
 @router.callback_query(Wizard.preview, F.data == "publish")
 async def publish_start(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.destinations); await call.message.answer(deco("<b>MULTI-PUBLISH</b>") + "\n\nEk hi message mein channel/group links ya private chat IDs bhejein. Bot sab detect karega.\n\nPrivate destination ke liye pehle bot ko admin banayein. Har destination new line par dena behtar hai.", reply_markup=kb([[button("Cancel", "cancel", "danger")]]))
+
+@router.callback_query(Wizard.preview, F.data == "cm_confirm_publish")
+async def cm_confirm_publish(call: CallbackQuery, state: FSMContext, bot: Bot):
+    data = await state.get_data(); user = await store.load_user(call.from_user.id); targets = user.get("destinations", [])
+    rendered = decorate_text(data.get("text", ""), data.get("design", "card"), data.get("refresh", 0)); results = []
+    for target in targets[:pyconfig.MAX_DESTINATIONS_PER_POST]:
+        try:
+            chat = int(target) if str(target).startswith("-100") else target
+            info = await bot.get_chat(chat_id=chat); me = await bot.get_me(); member = await bot.get_chat_member(info.id, me.id)
+            if member.status not in {"administrator", "creator"}: results.append(f"❌ {target}: Bot ko admin karein"); continue
+            markup = kb([[url_button(data["button_name"], data["button_url"], "primary")]]) if data.get("button_name") and data.get("button_url") else None
+            if data.get("media_type") == "photo": await bot.send_photo(info.id, data["media_id"], caption=rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
+            elif data.get("media_type") == "video": await bot.send_video(info.id, data["media_id"], caption=rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
+            else: await bot.send_message(info.id, rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
+            results.append(f"✅ {target}: Published")
+        except Exception as exc: results.append(f"❌ {target}: {str(exc)[:80]}")
+    user.setdefault("posts", []).append({"text": data.get("text"), "created_at": datetime.now(timezone.utc).isoformat(), "channel_manager": True})
+    await store.save_user(call.from_user.id, user); await state.clear()
+    await call.message.answer(deco("<b>CHANNEL PUBLISH REPORT</b>") + "\n\n" + ("\n".join(results) or "No verified destinations."), reply_markup=main_kb(call.from_user.id in OWNER_IDS))
 
 def parse_destinations(raw: str) -> list[str]:
     """Convert user input into Bot API chat_id values.
