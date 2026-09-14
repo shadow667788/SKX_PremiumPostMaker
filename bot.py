@@ -30,12 +30,16 @@ BRAND = pyconfig.BRAND
 store = GitHubJSONStore()
 router = Router()
 VALID_CUSTOM_EMOJI_IDS: set[str] = set()
+CUSTOM_EMOJI_FALLBACKS: dict[str, str] = {}
 
 
 def em(user_id: str | int, fallback: str = "✦") -> str:
-    # Keep the ID pool for future verified rendering, but never put a raw
-    # custom-emoji entity in a normal HTML message. A single bad ID causes
-    # Telegram to reject the entire message with ENTITY_TEXT_INVALID.
+    emoji_id = str(user_id)
+    if emoji_id in VALID_CUSTOM_EMOJI_IDS:
+        # Telegram requires a valid ordinary emoji alternative in the HTML
+        # custom-emoji entity. Use the emoji returned by getCustomEmojiStickers.
+        safe_fallback = CUSTOM_EMOJI_FALLBACKS.get(emoji_id, fallback)
+        return f'<tg-emoji emoji-id="{emoji_id}">{safe_fallback}</tg-emoji>'
     return fallback
 
 
@@ -45,14 +49,13 @@ def deco(text: str, count: int = 2) -> str:
 
 
 def button(text: str, callback: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    # Telegram can reject a whole reply markup with ENTITY_TEXT_INVALID when
-    # a custom emoji icon is not valid for the bot/chat. Keep keyboards plain
-    # and reliable; premium IDs remain available for validated post content.
-    return InlineKeyboardButton(text=text, callback_data=callback, style=style)
+    icon_id = icon if icon in VALID_CUSTOM_EMOJI_IDS else next(iter(VALID_CUSTOM_EMOJI_IDS), None)
+    return InlineKeyboardButton(text=text, callback_data=callback, style=style, icon_custom_emoji_id=icon_id)
 
 
 def url_button(text: str, url: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, url=url, style=style)
+    icon_id = icon if icon in VALID_CUSTOM_EMOJI_IDS else next(iter(VALID_CUSTOM_EMOJI_IDS), None)
+    return InlineKeyboardButton(text=text, url=url, style=style, icon_custom_emoji_id=icon_id)
 
 
 def kb(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
@@ -199,20 +202,47 @@ async def done(call: CallbackQuery, state: FSMContext):
 @router.callback_query(Wizard.preview, F.data == "publish")
 async def publish_start(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.destinations); await call.message.answer(deco("<b>MULTI-PUBLISH</b>") + "\n\nEk hi message mein channel/group links ya private chat IDs bhejein. Bot sab detect karega.\n\nPrivate destination ke liye pehle bot ko admin banayein. Har destination new line par dena behtar hai.", reply_markup=kb([[button("Cancel", "cancel", "danger")]]))
 
+def parse_destinations(raw: str) -> list[str]:
+    """Convert user input into Bot API chat_id values.
+
+    Bot API accepts @public_channel_username or an integer chat ID. It does
+    not accept t.me invite URLs as chat_id, so private invite links are kept
+    as a diagnostic token and the user is told to provide the -100... ID.
+    """
+    tokens = re.findall(r"(?:https?://t\.me/[A-Za-z0-9_+/-]+|@[A-Za-z0-9_]+|-100\d+)", raw)
+    result: list[str] = []
+    for token in tokens:
+        if token.startswith("-100") or token.startswith("@"):
+            value = token
+        else:
+            slug = token.rstrip("/").split("/", 3)[-1]
+            value = f"@{slug}" if slug and not slug.startswith(("+", "joinchat", "c/")) else f"__private_link__:{token}"
+        if value not in result:
+            result.append(value)
+    return result
+
 @router.message(Wizard.destinations)
 async def publish_destinations(message: Message, state: FSMContext, bot: Bot):
-    raw = message.text or ""; targets = re.findall(r"(?:https?://t\.me/[^\s,]+|@[A-Za-z0-9_]+|-100\d+)", raw); targets = list(dict.fromkeys(targets))
+    raw = message.text or ""
+    targets = parse_destinations(raw)
     data=await state.get_data(); rendered=decorate_text(data.get("text",""),data.get("design","card"),data.get("refresh",0)); results=[]
     for target in targets[:pyconfig.MAX_DESTINATIONS_PER_POST]:
+        if target.startswith("__private_link__:"):
+            results.append(f"❌ {target.removeprefix('__private_link__:')}: Private invite link se chat_id nahi milta; -100... ID bhejein")
+            continue
         chat = int(target) if target.startswith("-100") else target
         try:
-            member=await bot.get_chat_member(chat, (await bot.get_me()).id)
+            # Public @usernames are valid Bot API chat_id values. Invite URLs
+            # are not chat IDs; private chats must be supplied as -100... IDs.
+            chat_info = await bot.get_chat(chat_id=chat)
+            resolved_chat = chat_info.id
+            member=await bot.get_chat_member(resolved_chat, (await bot.get_me()).id)
             if member.status not in {"administrator","creator"}: results.append(f"❌ {target}: Bot ko admin karein"); continue
             markup=None
             if data.get("button_name") and data.get("button_url"): markup=kb([[url_button(data["button_name"], data["button_url"], "primary")]])
-            if data.get("media_type")=="photo": await bot.send_photo(chat,data["media_id"],caption=rendered,reply_markup=markup)
-            elif data.get("media_type")=="video": await bot.send_video(chat,data["media_id"],caption=rendered,reply_markup=markup)
-            else: await bot.send_message(chat,rendered,reply_markup=markup)
+            if data.get("media_type")=="photo": await bot.send_photo(resolved_chat,data["media_id"],caption=rendered,reply_markup=markup)
+            elif data.get("media_type")=="video": await bot.send_video(resolved_chat,data["media_id"],caption=rendered,reply_markup=markup)
+            else: await bot.send_message(resolved_chat,rendered,reply_markup=markup)
             results.append(f"✅ {target}: Published")
         except Exception as exc: results.append(f"❌ {target}: {str(exc)[:80]}")
     user = await store.load_user(message.from_user.id)
@@ -287,9 +317,10 @@ async def broadcast(message: Message, state: FSMContext, bot: Bot):
     for target in destinations:
         try:
             chat = int(target) if str(target).startswith("-100") else target
-            member = await bot.get_chat_member(chat, (await bot.get_me()).id)
+            resolved = (await bot.get_chat(chat_id=chat)).id
+            member = await bot.get_chat_member(resolved, (await bot.get_me()).id)
             if member.status in {"administrator", "creator"}:
-                await bot.copy_message(chat, message.chat.id, message.message_id); channel_sent += 1
+                await bot.copy_message(resolved, message.chat.id, message.message_id); channel_sent += 1
         except Exception: pass
     await state.clear(); await message.answer(deco(f"Broadcast complete. DM sent: {sent}\nChannel/group sent: {channel_sent}"),reply_markup=main_kb(True))
 
@@ -311,20 +342,30 @@ async def main() -> None:
     persisted = await store.load_meta()
     OWNER_IDS.update(int(x) for x in persisted.get("owner_ids", []))
     bot=Bot(TOKEN,default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    global VALID_CUSTOM_EMOJI_IDS
+    global VALID_CUSTOM_EMOJI_IDS, CUSTOM_EMOJI_FALLBACKS
     try:
         for start in range(0, len(store.emoji_ids), 50):
             chunk = store.emoji_ids[start:start + 50]
             try:
                 stickers = await bot.get_custom_emoji_stickers(custom_emoji_ids=chunk)
-                VALID_CUSTOM_EMOJI_IDS.update(str(sticker.custom_emoji_id) for sticker in stickers if sticker.custom_emoji_id)
+                for sticker in stickers:
+                    if sticker.custom_emoji_id:
+                        emoji_id = str(sticker.custom_emoji_id)
+                        VALID_CUSTOM_EMOJI_IDS.add(emoji_id)
+                        if sticker.emoji:
+                            CUSTOM_EMOJI_FALLBACKS[emoji_id] = sticker.emoji
             except Exception:
                 # An invalid ID can reject a whole request; isolate it without
                 # preventing the remaining valid premium IDs from working.
                 for emoji_id in chunk:
                     try:
                         stickers = await bot.get_custom_emoji_stickers(custom_emoji_ids=[emoji_id])
-                        VALID_CUSTOM_EMOJI_IDS.update(str(sticker.custom_emoji_id) for sticker in stickers if sticker.custom_emoji_id)
+                        for sticker in stickers:
+                            if sticker.custom_emoji_id:
+                                emoji_id = str(sticker.custom_emoji_id)
+                                VALID_CUSTOM_EMOJI_IDS.add(emoji_id)
+                                if sticker.emoji:
+                                    CUSTOM_EMOJI_FALLBACKS[emoji_id] = sticker.emoji
                     except Exception:
                         continue
     except Exception:
