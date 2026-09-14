@@ -31,7 +31,11 @@ router = Router()
 
 
 def em(user_id: str | int, fallback: str = "✦") -> str:
-    return f'<tg-emoji emoji-id="{user_id}">{fallback}</tg-emoji>'
+    # Do not inject unverified custom-emoji IDs into HTML messages. Telegram
+    # rejects an unknown/invalid ID with ENTITY_TEXT_INVALID and the whole
+    # message then fails. The IDs remain available to the owner emoji pool;
+    # normal UI messages use a safe Unicode fallback until an ID is verified.
+    return fallback
 
 
 def deco(text: str, count: int = 2) -> str:
@@ -40,12 +44,12 @@ def deco(text: str, count: int = 2) -> str:
 
 
 def button(text: str, callback: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    # aiogram 3.24+ serializes the Bot API 10.3 style and icon_custom_emoji_id fields.
-    return InlineKeyboardButton(text=text, callback_data=callback, style=style, icon_custom_emoji_id=icon)
+    # Keep callback buttons compatible with all Telegram Bot API versions.
+    return InlineKeyboardButton(text=text, callback_data=callback, style=style)
 
 
 def url_button(text: str, url: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, url=url, style=style, icon_custom_emoji_id=icon)
+    return InlineKeyboardButton(text=text, url=url, style=style)
 
 
 def kb(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
