@@ -75,6 +75,8 @@ async def is_member(bot: Bot, user_id: int, chat: str | int) -> bool:
 
 
 async def membership_screen(bot: Bot, user_id: int) -> tuple[bool, str]:
+    if not pyconfig.MEMBERSHIP_GATE_ENABLED:
+        return True, ""
     checks: list[tuple[str | int, str]] = [(x, str(x)) for x in REQUIRED] + [(PRIVATE_REQUIRED, "Private group")]
     missing = [label for chat, label in checks if not await is_member(bot, user_id, chat)]
     if not missing:
