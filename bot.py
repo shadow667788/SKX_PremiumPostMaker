@@ -33,9 +33,9 @@ VALID_CUSTOM_EMOJI_IDS: set[str] = set()
 
 
 def em(user_id: str | int, fallback: str = "✦") -> str:
-    emoji_id = str(user_id)
-    if emoji_id in VALID_CUSTOM_EMOJI_IDS:
-        return f'<tg-emoji emoji-id="{emoji_id}">{fallback}</tg-emoji>'
+    # Keep the ID pool for future verified rendering, but never put a raw
+    # custom-emoji entity in a normal HTML message. A single bad ID causes
+    # Telegram to reject the entire message with ENTITY_TEXT_INVALID.
     return fallback
 
 
@@ -45,13 +45,14 @@ def deco(text: str, count: int = 2) -> str:
 
 
 def button(text: str, callback: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    icon_id = icon if icon in VALID_CUSTOM_EMOJI_IDS else (random.choice(tuple(VALID_CUSTOM_EMOJI_IDS)) if VALID_CUSTOM_EMOJI_IDS else None)
-    return InlineKeyboardButton(text=text, callback_data=callback, style=style, icon_custom_emoji_id=icon_id)
+    # Telegram can reject a whole reply markup with ENTITY_TEXT_INVALID when
+    # a custom emoji icon is not valid for the bot/chat. Keep keyboards plain
+    # and reliable; premium IDs remain available for validated post content.
+    return InlineKeyboardButton(text=text, callback_data=callback, style=style)
 
 
 def url_button(text: str, url: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    icon_id = icon if icon in VALID_CUSTOM_EMOJI_IDS else (random.choice(tuple(VALID_CUSTOM_EMOJI_IDS)) if VALID_CUSTOM_EMOJI_IDS else None)
-    return InlineKeyboardButton(text=text, url=url, style=style, icon_custom_emoji_id=icon_id)
+    return InlineKeyboardButton(text=text, url=url, style=style)
 
 
 def kb(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
