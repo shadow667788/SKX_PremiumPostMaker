@@ -496,7 +496,7 @@ async def save_emojis(message: Message, state: FSMContext):
 @router.callback_query(F.data == "oadd")
 async def oadd(call: CallbackQuery, state: FSMContext):
     if call.from_user.id not in OWNER_IDS:return
-    await state.set_state(OwnerFlow.add_owner); await call.message.answer("New owner ka numeric Telegram ID bhejein.")
+    await state.set_state(OwnerFlow.add_owner); await edit_ui(call.message, "New owner ka numeric Telegram ID bhejein.", kb([[button("Cancel", "cancel", "danger")]]))
 @router.message(OwnerFlow.add_owner)
 async def add_owner(message: Message, state: FSMContext):
     if message.from_user.id not in OWNER_IDS:return
@@ -506,7 +506,7 @@ async def add_owner(message: Message, state: FSMContext):
 @router.callback_query(F.data == "oremove")
 async def oremove(call: CallbackQuery, state: FSMContext):
     if call.from_user.id not in OWNER_IDS:return
-    await state.set_state(OwnerFlow.remove_owner); await call.message.answer("Remove karne wale owner ka numeric ID bhejein. Current owner IDs: "+", ".join(map(str,OWNER_IDS)))
+    await state.set_state(OwnerFlow.remove_owner); await edit_ui(call.message, "Remove karne wale owner ka numeric ID bhejein. Current owner IDs: "+", ".join(map(str,OWNER_IDS)), kb([[button("Cancel", "cancel", "danger")]]))
 @router.message(OwnerFlow.remove_owner)
 async def remove_owner(message: Message, state: FSMContext):
     if message.from_user.id not in OWNER_IDS:return
@@ -518,7 +518,7 @@ async def remove_owner(message: Message, state: FSMContext):
 @router.callback_query(F.data == "obroadcast")
 async def obroadcast(call: CallbackQuery, state: FSMContext):
     if call.from_user.id not in OWNER_IDS:return
-    await state.update_data(broadcast_mode="all"); await state.set_state(OwnerFlow.broadcast_all); await call.message.answer("Broadcast message bhejein. Yeh users aur registered channels/groups dono ko jayega.")
+    await state.update_data(broadcast_mode="all"); await state.set_state(OwnerFlow.broadcast_all); await edit_ui(call.message, "Broadcast message bhejein. Yeh users aur registered channels/groups dono ko jayega.", kb([[button("Cancel", "cancel", "danger")]]))
 
 @router.callback_query(F.data.in_({"ob_all", "ob_users", "ob_channels"}))
 async def broadcast_mode(call: CallbackQuery, state: FSMContext):
@@ -527,7 +527,7 @@ async def broadcast_mode(call: CallbackQuery, state: FSMContext):
     target_state = {"all": OwnerFlow.broadcast_all, "users": OwnerFlow.broadcast_users, "channels": OwnerFlow.broadcast_channels}[mode]
     await state.update_data(broadcast_mode=mode); await state.set_state(target_state)
     prompt = {"all": "users aur channels/groups", "users": "sirf users", "channels": "sirf registered channels/groups"}[mode]
-    await call.message.answer(f"Broadcast message bhejein — yeh {prompt} ko jayega.")
+    await edit_ui(call.message, f"Broadcast message bhejein — yeh {prompt} ko jayega.", kb([[button("Cancel", "cancel", "danger")]]))
 
 @router.message(OwnerFlow.broadcast)
 @router.message(OwnerFlow.broadcast_all)
@@ -558,11 +558,11 @@ async def broadcast(message: Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data == "posts")
 async def posts(call: CallbackQuery):
-    user=await store.load_user(call.from_user.id); total=len(user.get("posts",[])); await call.message.answer(deco(f"<b>MY POSTS</b>\n\nSaved posts: {total}"),reply_markup=main_kb(call.from_user.id in OWNER_IDS))
+    user=await store.load_user(call.from_user.id); total=len(user.get("posts",[])); await edit_ui(call.message, deco(f"<b>MY POSTS</b>\n\nSaved posts: {total}"), main_kb(call.from_user.id in OWNER_IDS))
 @router.callback_query(F.data == "extract")
-async def extract(call: CallbackQuery): await call.message.answer(deco("<b>EMOJI EXTRACTOR</b>\n\nPremium emoji wale message ko forward karein ya custom emoji entity wala text bhejein. IDs ko owner panel se pool mein add kiya ja sakta hai."),reply_markup=main_kb(call.from_user.id in OWNER_IDS))
+async def extract(call: CallbackQuery): await edit_ui(call.message, deco("<b>EMOJI EXTRACTOR</b>\n\nPremium emoji wale message ko forward karein ya custom emoji entity wala text bhejein. IDs ko owner panel se pool mein add kiya ja sakta hai."), main_kb(call.from_user.id in OWNER_IDS))
 @router.callback_query(F.data == "help")
-async def help_(call: CallbackQuery): await call.message.answer(deco("<b>HELP</b>\n\nMake Post → media → button → design → preview → publish. Private channels/groups mein bot ko pehle admin karein."),reply_markup=main_kb(call.from_user.id in OWNER_IDS))
+async def help_(call: CallbackQuery): await edit_ui(call.message, deco("<b>HELP</b>\n\nMake Post → media → button → design → preview → publish. Private channels/groups mein bot ko pehle admin karein."), main_kb(call.from_user.id in OWNER_IDS))
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery): await call.message.edit_text(deco(BRAND),reply_markup=main_kb(True))
 @router.callback_query(F.data == "noop")
