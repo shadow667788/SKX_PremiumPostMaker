@@ -494,7 +494,8 @@ async def cancel(call: CallbackQuery, state: FSMContext): await state.clear(); a
 @router.callback_query(F.data == "owner")
 async def owner_panel(call: CallbackQuery):
     if call.from_user.id not in OWNER_IDS: await call.answer("Access denied", show_alert=True); return
-    await call.message.edit_text(deco("<b>OWNER CONTROL CENTER</b>") + "\n\nSecure administration tools.", reply_markup=kb([
+    await call.answer()
+    await edit_ui(call.message, deco("<b>OWNER CONTROL CENTER</b>") + "\n\nSecure administration tools.", reply_markup=kb([
         [button("➕ ADD EMOJIS", "oemoji", "success")],
         [button("➕ ADD OWNER", "oadd", "primary"), button("➖ REMOVE OWNER", "oremove", "danger")],
         [button("📣 BROADCAST ALL", "ob_all", "danger")],
@@ -601,7 +602,9 @@ async def extract(call: CallbackQuery): await edit_ui(call.message, deco("<b>EMO
 @router.callback_query(F.data == "help")
 async def help_(call: CallbackQuery): await edit_ui(call.message, deco("<b>HELP</b>\n\nMake Post → media → button → design → preview → publish. Private channels/groups mein bot ko pehle admin karein."), main_kb(call.from_user.id in OWNER_IDS))
 @router.callback_query(F.data == "back")
-async def back(call: CallbackQuery): await call.message.edit_text(deco(BRAND),reply_markup=main_kb(True))
+async def back(call: CallbackQuery):
+    await call.answer()
+    await edit_ui(call.message, deco(BRAND), main_kb(call.from_user.id in OWNER_IDS))
 @router.callback_query(F.data == "noop")
 async def noop(call: CallbackQuery): await call.answer()
 
