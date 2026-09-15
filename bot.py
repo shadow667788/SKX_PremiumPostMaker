@@ -1,5 +1,6 @@
 
 
+
 from __future__ import annotations
 
 import asyncio
@@ -371,7 +372,10 @@ async def choose_design(message: Message, state: FSMContext):
 
 @router.callback_query(Wizard.design, F.data.startswith("design_"))
 async def design(call: CallbackQuery, state: FSMContext):
-    await state.update_data(design=call.data.removeprefix("design_")); await state.set_state(Wizard.preview); await show_preview(call.message, state)
+    # A design change intentionally creates a fresh emoji layout.
+    await state.update_data(design=call.data.removeprefix("design_"), rendered_preview=None)
+    await state.set_state(Wizard.preview)
+    await show_preview(call.message, state)
 
 KEYWORDS = {"warning": ["warning", "alert", "danger", "caution"], "tech": ["code", "python", "bot", "api", "tech"], "offer": ["offer", "sale", "free", "deal", "price"], "news": ["news", "update", "announcement"], "gaming": ["game", "gaming", "play"], "hacker": ["hack", "security", "cyber", "terminal"]}
 SAFE_FALLBACKS = ["🔥", "⚡", "🚀", "💎", "🌟", "🛡️", "🎯", "🧿", "🛰️", "💠"]
@@ -413,7 +417,11 @@ def post_buttons(data: dict) -> list[list[InlineKeyboardButton]]:
 
 
 async def show_preview(message: Message, state: FSMContext):
-    data = await state.get_data(); refresh = data.get("refresh", 0); rendered = decorate_text(data.get("text", ""), data.get("design", "card"), refresh, premium=not data.get("normal_mode", False))
+    data = await state.get_data()
+    rendered = data.get("rendered_preview")
+    if not rendered:
+        rendered = decorate_text(data.get("text", ""), data.get("design", "card"), data.get("refresh", 0), premium=not data.get("normal_mode", False))
+        await state.update_data(rendered_preview=rendered)
     rows = [[button("↻ Refresh Emoji", "refresh", "primary"), button("Change Design", "change_design", "success")], [button("Delete Post", "cancel", "danger"), button("✓ Done", "done", "success")]]
     if data.get("channel_manager"):
         rows.append([button("✅ CONFIRM PUBLISH TO MY CHANNELS", "cm_confirm_publish", "success")])
@@ -427,7 +435,8 @@ async def show_preview(message: Message, state: FSMContext):
     await state.set_state(Wizard.preview)
 
 async def send_final_post(message: Message, data: dict) -> None:
-    rendered = decorate_text(data.get("text", ""), data.get("design", "card"), data.get("refresh", 0), premium=not data.get("normal_mode", False))
+    # Reuse the exact preview HTML so Done cannot silently replace its emojis.
+    rendered = data.get("rendered_preview") or decorate_text(data.get("text", ""), data.get("design", "card"), data.get("refresh", 0), premium=not data.get("normal_mode", False))
     markup = None
     button_rows = post_buttons(data)
     if button_rows:
@@ -440,7 +449,11 @@ async def send_final_post(message: Message, data: dict) -> None:
         await message.answer(rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 @router.callback_query(Wizard.preview, F.data == "refresh")
-async def refresh(call: CallbackQuery, state: FSMContext): data=await state.get_data(); await state.update_data(refresh=data.get("refresh",0)+1); await call.message.delete(); await show_preview(call.message, state)
+async def refresh(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    await state.update_data(refresh=data.get("refresh", 0) + 1, rendered_preview=None)
+    await call.message.delete()
+    await show_preview(call.message, state)
 @router.callback_query(Wizard.preview, F.data == "change_design")
 async def change_design(call: CallbackQuery, state: FSMContext): await choose_design(call.message, state)
 @router.callback_query(Wizard.preview, F.data == "done")
@@ -459,7 +472,7 @@ async def publish_start(call: CallbackQuery, state: FSMContext): await state.set
 @router.callback_query(Wizard.preview, F.data == "cm_confirm_publish")
 async def cm_confirm_publish(call: CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data(); user = await store.load_user(call.from_user.id); targets = user.get("destinations", [])
-    rendered = decorate_text(data.get("text", ""), data.get("design", "card"), data.get("refresh", 0), premium=False); results = []
+    rendered = data.get("rendered_preview") or decorate_text(data.get("text", ""), data.get("design", "card"), data.get("refresh", 0), premium=False); results = []
     for target in targets[:pyconfig.MAX_DESTINATIONS_PER_POST]:
         try:
             chat = int(target) if str(target).startswith("-100") else target
