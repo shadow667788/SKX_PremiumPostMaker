@@ -495,7 +495,7 @@ async def cancel(call: CallbackQuery, state: FSMContext): await state.clear(); a
 async def owner_panel(call: CallbackQuery):
     if call.from_user.id not in OWNER_IDS: await call.answer("Access denied", show_alert=True); return
     await call.answer()
-    await edit_ui(call.message, deco("<b>OWNER CONTROL CENTER</b>") + "\n\nSecure administration tools.", reply_markup=kb([
+    await call.message.answer(deco("<b>OWNER CONTROL CENTER</b>") + "\n\nSecure administration tools.", reply_markup=kb([
         [button("➕ ADD EMOJIS", "oemoji", "success")],
         [button("➕ ADD OWNER", "oadd", "primary"), button("➖ REMOVE OWNER", "oremove", "danger")],
         [button("📣 BROADCAST ALL", "ob_all", "danger")],
