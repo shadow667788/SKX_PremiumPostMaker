@@ -142,7 +142,7 @@ def join_button_rows() -> list[list[InlineKeyboardButton]]:
     rows: list[list[InlineKeyboardButton]] = []
     for index, destination in enumerate(REQUIRED, 1):
         url = destination if destination.startswith("http") else f"https://t.me/{destination.lstrip('@')}"
-        rows.append([url_button(f"🟢 JOIN CHANNEL {index}", url, "success")])
+        rows.append([url_button(f"🟢 JOIN {CHANNEL_LABELS[index - 1]}", url, "success")])
     if PRIVATE_INVITE_LINK:
         rows.append([url_button("🔴 JOIN PRIVATE GROUP", PRIVATE_INVITE_LINK, "danger")])
     rows.append([button("✅ VERIFY MEMBERSHIP", "verify", "success")])
