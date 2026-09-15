@@ -129,6 +129,14 @@ async def is_member(bot: Bot, user_id: int, chat: str | int) -> bool:
         return False
 
 
+async def user_can_manage(bot: Bot, chat_id: int | str, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        return member.status in {"creator", "administrator"}
+    except Exception:
+        return False
+
+
 async def membership_screen(bot: Bot, user_id: int) -> tuple[bool, str]:
     if not GATE_ENABLED:
         return True, ""
@@ -261,6 +269,8 @@ async def cm_add_save(message: Message, state: FSMContext, bot: Bot):
         me = await bot.get_me(); member = await bot.get_chat_member(info.id, me.id)
         if member.status not in {"administrator", "creator"}:
             await message.answer("Pehle is channel/group mein bot ko administrator banayein."); return
+        if not await user_can_manage(bot, info.id, message.from_user.id):
+            await message.answer("Security check failed: aap is channel/group ke admin ya owner nahi hain. Sirf apne managed destinations add kar sakte hain."); return
         user = await store.load_user(message.from_user.id)
         user["destinations"] = list(dict.fromkeys(user.get("destinations", []) + [str(info.id) if str(info.id).startswith("-100") else target]))
         user.setdefault("history", []).append({"event": "destination_added", "chat_id": str(info.id), "at": datetime.now(timezone.utc).isoformat()})
@@ -417,6 +427,7 @@ async def cm_confirm_publish(call: CallbackQuery, state: FSMContext, bot: Bot):
             chat = int(target) if str(target).startswith("-100") else target
             info = await bot.get_chat(chat_id=chat); me = await bot.get_me(); member = await bot.get_chat_member(info.id, me.id)
             if member.status not in {"administrator", "creator"}: results.append(f"❌ {target}: Bot ko admin karein"); continue
+            if not await user_can_manage(bot, info.id, call.from_user.id): results.append(f"❌ {target}: Aap is destination ke admin/owner nahi hain"); continue
             markup = kb([[url_button(data["button_name"], data["button_url"], "primary")]]) if data.get("button_name") and data.get("button_url") else None
             if data.get("media_type") == "photo": await bot.send_photo(info.id, data["media_id"], caption=rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
             elif data.get("media_type") == "video": await bot.send_video(info.id, data["media_id"], caption=rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
@@ -463,6 +474,7 @@ async def publish_destinations(message: Message, state: FSMContext, bot: Bot):
             resolved_chat = chat_info.id
             member=await bot.get_chat_member(resolved_chat, (await bot.get_me()).id)
             if member.status not in {"administrator","creator"}: results.append(f"❌ {target}: Bot ko admin karein"); continue
+            if not await user_can_manage(bot, resolved_chat, message.from_user.id): results.append(f"❌ {target}: Aap is destination ke admin/owner nahi hain"); continue
             markup=None
             if data.get("button_name") and data.get("button_url"): markup=kb([[url_button(data["button_name"], data["button_url"], "primary")]])
             if data.get("media_type")=="photo": await bot.send_photo(resolved_chat,data["media_id"],caption=rendered,parse_mode=ParseMode.HTML,reply_markup=markup)
