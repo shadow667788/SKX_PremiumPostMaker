@@ -31,7 +31,8 @@ store = GitHubJSONStore()
 router = Router()
 VALID_CUSTOM_EMOJI_IDS: set[str] = set()
 CUSTOM_EMOJI_FALLBACKS: dict[str, str] = {}
-GATE_ENABLED = True
+GATE_ENABLED = getattr(pyconfig, "MEMBERSHIP_GATE_ENABLED", True)
+CHANNEL_LABELS = getattr(pyconfig, "REQUIRED_CHANNEL_LABELS", REQUIRED)
 PRIVATE_INVITE_LINK = getattr(pyconfig, "REQUIRED_PRIVATE_INVITE_LINK", "")
 CUSTOM_BUTTON_ICONS = False
 _EMOJI_CURSOR = 0
@@ -47,9 +48,9 @@ def em(user_id: str | int, fallback: str = "✦") -> str:
     return fallback
 
 
-def deco(text: str, count: int = 2) -> str:
+def deco(text: str, count: int = 5) -> str:
     pool = store.emoji_ids or ["5449569374065152798"]
-    count = max(count, 3)
+    count = max(count, 5)
     ids = rotating_ids(pool, count)
     return " ".join(em(x, SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)]) for i, x in enumerate(ids)) + " " + text
 
@@ -131,7 +132,7 @@ async def is_member(bot: Bot, user_id: int, chat: str | int) -> bool:
 async def membership_screen(bot: Bot, user_id: int) -> tuple[bool, str]:
     if not GATE_ENABLED:
         return True, ""
-    checks: list[tuple[str | int, str]] = [(x, str(x)) for x in REQUIRED] + [(PRIVATE_REQUIRED, "Private group")]
+    checks: list[tuple[str | int, str]] = list(zip(REQUIRED, CHANNEL_LABELS)) + [(PRIVATE_REQUIRED, "🔒 Private group")]
     missing = [label for chat, label in checks if not await is_member(bot, user_id, chat)]
     if not missing:
         return True, ""
@@ -230,7 +231,7 @@ async def channel_manager_screen(message: Message, user_id: int, edit: bool = Fa
     user = await store.load_user(user_id)
     destinations = user.get("destinations", [])
     listed = "\n".join(f"• {x} ✅ Bot admin hai" for x in destinations) or "Abhi koi channel/group add nahi hai."
-    text = deco("<b>CHANNEL POST MANAGER</b>") + f"\n\nAapke verified channels/groups:\n{listed}\n\nNaya channel add karne ke baad bot ko administrator zaroor banayein."
+    text = "📡 <b>CHANNEL POST MANAGER</b> 🛠️" + f"\n\nAapke verified channels/groups:\n{listed}\n\nNaya channel add karne ke baad bot ko administrator zaroor banayein."
     markup = kb([
         [button("➕ ADD CHANNEL/GROUP", "cm_add", "success")],
         [button("➖ REMOVE CHANNEL/GROUP", "cm_remove", "danger")],
@@ -350,8 +351,8 @@ def dense_lines(body: str, marks: list[str]) -> str:
 
 def decorate_text(text: str, style: str, refresh: int = 0, premium: bool = True) -> str:
     pool = store.emoji_ids or ["5449569374065152798"]
-    chosen = rotating_ids(pool, 7)
-    while len(chosen) < 7:
+    chosen = rotating_ids(pool, 12)
+    while len(chosen) < 12:
         chosen.append(pool[len(chosen) % len(pool)])
     marks = [em(x, SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)]) if premium else SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)] for i, x in enumerate(chosen)]
     title, body = split_title_body(text)
