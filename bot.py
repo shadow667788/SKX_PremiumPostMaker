@@ -1,4 +1,5 @@
 
+
 from __future__ import annotations
 
 import asyncio
@@ -334,7 +335,7 @@ async def btn_yes(call: CallbackQuery, state: FSMContext):
 
 @router.callback_query(Wizard.button_choice, F.data == "btn_no")
 async def btn_no(call: CallbackQuery, state: FSMContext):
-    await state.update_data(buttons=[])
+    # Preserve all buttons collected so far when continuing to design.
     await choose_design(call.message, state)
 
 @router.message(Wizard.button_name)
