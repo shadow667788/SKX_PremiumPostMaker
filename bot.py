@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import asyncio
@@ -158,7 +159,7 @@ def join_button_rows() -> list[list[InlineKeyboardButton]]:
 
 
 class Wizard(StatesGroup):
-    text = State(); media = State(); photo = State(); video = State(); button_choice = State(); button_name = State(); button_url = State(); design = State(); preview = State(); destinations = State()
+    text = State(); media = State(); photo = State(); video = State(); button_choice = State(); button_name = State(); button_url = State(); button_style = State(); design = State(); preview = State(); destinations = State()
 class OwnerFlow(StatesGroup):
     add_emojis = State(); broadcast = State(); broadcast_all = State(); broadcast_users = State(); broadcast_channels = State(); add_owner = State(); remove_owner = State()
 class ChannelManagerFlow(StatesGroup):
@@ -321,19 +322,47 @@ async def got_photo(message: Message, state: FSMContext): await state.update_dat
 async def got_video(message: Message, state: FSMContext): await state.update_data(media_type="video", media_id=message.video.file_id); await ask_button(message, state)
 
 async def ask_button(message: Message, state: FSMContext):
+    await state.update_data(buttons=[])
     await state.set_state(Wizard.button_choice)
-    await message.answer(deco("<b>BUTTON LAYER</b>") + "\n\nPost mein inline button add karna hai?", reply_markup=kb([[button("Yes, Add Button", "btn_yes", "success")], [button("No, Skip", "btn_no", "primary")]]))
+    await message.answer(deco("<b>BUTTON LAYER</b>") + "\n\nJitne buttons chahen add karein. Har button ka label, link aur rank/style choose hoga.", reply_markup=kb([[button("Yes, Add Button", "btn_yes", "success")], [button("No, Skip", "btn_no", "primary")]]))
 
 @router.callback_query(Wizard.button_choice, F.data == "btn_yes")
-async def btn_yes(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.button_name); await call.message.edit_text(deco("<b>BUTTON LABEL</b>") + "\n\nButton ka naam bhejein.")
+async def btn_yes(call: CallbackQuery, state: FSMContext):
+    await state.set_state(Wizard.button_name)
+    await call.answer()
+    await call.message.answer(deco("<b>BUTTON LABEL</b>") + "\n\nButton ka naam bhejein.")
+
 @router.callback_query(Wizard.button_choice, F.data == "btn_no")
-async def btn_no(call: CallbackQuery, state: FSMContext): await state.update_data(button_name=None, button_url=None); await choose_design(call.message, state)
+async def btn_no(call: CallbackQuery, state: FSMContext):
+    await state.update_data(buttons=[])
+    await choose_design(call.message, state)
+
 @router.message(Wizard.button_name)
-async def btn_name(message: Message, state: FSMContext): await state.update_data(button_name=message.text[:64]); await state.set_state(Wizard.button_url); await message.answer(deco("<b>BUTTON LINK</b>") + "\n\nHTTPS ya Telegram link bhejein.")
+async def btn_name(message: Message, state: FSMContext):
+    await state.update_data(pending_button_name=(message.text or "")[:64])
+    await state.set_state(Wizard.button_url)
+    await message.answer(deco("<b>BUTTON LINK</b>") + "\n\nHTTPS ya Telegram link bhejein.")
+
 @router.message(Wizard.button_url)
 async def btn_url(message: Message, state: FSMContext):
-    if not re.match(r"^(https?://|tg://)", message.text or ""): await message.answer("Valid HTTPS ya tg:// link bhejein."); return
-    await state.update_data(button_url=message.text); await choose_design(message, state)
+    if not re.match(r"^(https?://|tg://)", message.text or ""):
+        await message.answer("Valid HTTPS ya tg:// link bhejein."); return
+    await state.update_data(pending_button_url=message.text)
+    await state.set_state(Wizard.button_style)
+    await message.answer(deco("<b>BUTTON RANK / STYLE</b>") + "\n\nIs button ka rank choose karein.", reply_markup=kb([[button("Success", "style_success", "success")], [button("Danger", "style_danger", "danger")], [button("Primary", "style_primary", "primary")]]))
+
+@router.callback_query(Wizard.button_style, F.data.in_({"style_success", "style_danger", "style_primary"}))
+async def button_style(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    buttons = list(data.get("buttons", []))
+    if len(buttons) >= 100:
+        await call.answer("Maximum 100 buttons allowed by Telegram.", show_alert=True); return
+    style = call.data.removeprefix("style_")
+    buttons.append({"name": data.get("pending_button_name", "Button"), "url": data.get("pending_button_url", ""), "style": style})
+    await state.update_data(buttons=buttons, pending_button_name=None, pending_button_url=None)
+    await state.set_state(Wizard.button_choice)
+    await call.answer("Button added")
+    await call.message.answer(deco(f"<b>BUTTON {len(buttons)} ADDED</b>") + "\n\nAur button add karna hai?", reply_markup=kb([[button("＋ Add Another Button", "btn_yes", "success")], [button("Continue to Design", "btn_no", "primary")]]))
 
 async def choose_design(message: Message, state: FSMContext):
     await state.set_state(Wizard.design)
@@ -375,13 +404,21 @@ def decorate_text(text: str, style: str, refresh: int = 0, premium: bool = True)
         return "<pre>╔══════════════════════════╗\n║  " + safe_title + "\n╠══ ████████████ 100% ════╣</pre>\n" + line_body + "\n<pre>╚══════════════════════════╝</pre>\n" + " ".join(marks)
     return "╭━━━━━━━━━━━━━━━━━━━━━━━━╮\n" + marks[0] + "  <b>" + safe_title + "</b>  " + marks[1] + "\n╰━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n" + line_body + "\n\n╭─ ✦ ─ ✦ ─ ✦ ─ ✦ ─ ✦ ─╮\n" + "  ".join(marks[2:]) + "\n╰━━━━━━━━━━━━━━━━━━━━━━━━╯"
 
+def post_buttons(data: dict) -> list[list[InlineKeyboardButton]]:
+    items = data.get("buttons") or []
+    if not items and data.get("button_name") and data.get("button_url"):
+        items = [{"name": data["button_name"], "url": data["button_url"], "style": "success"}]
+    return [[url_button(item.get("name", "Button"), item.get("url", ""), item.get("style", "primary"))] for item in items if item.get("url")]
+
+
 async def show_preview(message: Message, state: FSMContext):
     data = await state.get_data(); refresh = data.get("refresh", 0); rendered = decorate_text(data.get("text", ""), data.get("design", "card"), refresh, premium=not data.get("normal_mode", False))
     rows = [[button("↻ Refresh Emoji", "refresh", "primary"), button("Change Design", "change_design", "success")], [button("Delete Post", "cancel", "danger"), button("✓ Done", "done", "success")]]
     if data.get("channel_manager"):
         rows.append([button("✅ CONFIRM PUBLISH TO MY CHANNELS", "cm_confirm_publish", "success")])
-    if data.get("button_name") and data.get("button_url"):
-        rows.insert(0, [url_button(data["button_name"], data["button_url"], "success")])
+    button_rows = post_buttons(data)
+    if button_rows:
+        rows = button_rows + rows
     markup = kb(rows)
     if data.get("media_type") == "photo": await message.answer_photo(data["media_id"], caption=rendered, reply_markup=markup)
     elif data.get("media_type") == "video": await message.answer_video(data["media_id"], caption=rendered, reply_markup=markup)
@@ -391,9 +428,9 @@ async def show_preview(message: Message, state: FSMContext):
 async def send_final_post(message: Message, data: dict) -> None:
     rendered = decorate_text(data.get("text", ""), data.get("design", "card"), data.get("refresh", 0), premium=not data.get("normal_mode", False))
     markup = None
-    if data.get("button_name") and data.get("button_url"):
-        # Inline buttons support Telegram's primary/success/danger styles.
-        markup = kb([[url_button(data["button_name"], data["button_url"], "success")]])
+    button_rows = post_buttons(data)
+    if button_rows:
+        markup = kb(button_rows)
     if data.get("media_type") == "photo":
         await message.answer_photo(data["media_id"], caption=rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
     elif data.get("media_type") == "video":
@@ -428,7 +465,8 @@ async def cm_confirm_publish(call: CallbackQuery, state: FSMContext, bot: Bot):
             info = await bot.get_chat(chat_id=chat); me = await bot.get_me(); member = await bot.get_chat_member(info.id, me.id)
             if member.status not in {"administrator", "creator"}: results.append(f"❌ {target}: Bot ko admin karein"); continue
             if not await user_can_manage(bot, info.id, call.from_user.id): results.append(f"❌ {target}: Aap is destination ke admin/owner nahi hain"); continue
-            markup = kb([[url_button(data["button_name"], data["button_url"], "primary")]]) if data.get("button_name") and data.get("button_url") else None
+            button_rows = post_buttons(data)
+            markup = kb(button_rows) if button_rows else None
             if data.get("media_type") == "photo": await bot.send_photo(info.id, data["media_id"], caption=rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
             elif data.get("media_type") == "video": await bot.send_video(info.id, data["media_id"], caption=rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
             else: await bot.send_message(info.id, rendered, parse_mode=ParseMode.HTML, reply_markup=markup)
