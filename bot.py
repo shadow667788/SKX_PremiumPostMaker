@@ -31,6 +31,10 @@ store = GitHubJSONStore()
 router = Router()
 VALID_CUSTOM_EMOJI_IDS: set[str] = set()
 CUSTOM_EMOJI_FALLBACKS: dict[str, str] = {}
+GATE_ENABLED = True
+PRIVATE_INVITE_LINK = getattr(pyconfig, "REQUIRED_PRIVATE_INVITE_LINK", "")
+CUSTOM_BUTTON_ICONS = False
+_EMOJI_CURSOR = 0
 
 
 def em(user_id: str | int, fallback: str = "✦") -> str:
@@ -46,7 +50,18 @@ def em(user_id: str | int, fallback: str = "✦") -> str:
 def deco(text: str, count: int = 2) -> str:
     pool = store.emoji_ids or ["5449569374065152798"]
     count = max(count, 3)
-    return " ".join(em(x, SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)]) for i, x in enumerate(random.sample(pool, min(count, len(pool))))) + " " + text
+    ids = rotating_ids(pool, count)
+    return " ".join(em(x, SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)]) for i, x in enumerate(ids)) + " " + text
+
+def rotating_ids(pool: list[str], count: int) -> list[str]:
+    global _EMOJI_CURSOR
+    if not pool: return []
+    shuffled = list(dict.fromkeys(pool))
+    random.SystemRandom().shuffle(shuffled)
+    count = min(count, len(shuffled))
+    start = _EMOJI_CURSOR % len(shuffled)
+    _EMOJI_CURSOR += max(1, count)
+    return [shuffled[(start + i) % len(shuffled)] for i in range(count)]
 
 def icon_for(label: str, explicit: str | None = None) -> str | None:
     if explicit in VALID_CUSTOM_EMOJI_IDS:
@@ -56,12 +71,12 @@ def icon_for(label: str, explicit: str | None = None) -> str | None:
 
 
 def button(text: str, callback: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    icon_id = icon_for(text, icon)
+    icon_id = icon_for(text, icon) if CUSTOM_BUTTON_ICONS else None
     return InlineKeyboardButton(text=text, callback_data=callback, style=style, icon_custom_emoji_id=icon_id)
 
 
 def url_button(text: str, url: str, style: str = "primary", icon: str | None = None) -> InlineKeyboardButton:
-    icon_id = icon_for(text, icon)
+    icon_id = icon_for(text, icon) if CUSTOM_BUTTON_ICONS else None
     return InlineKeyboardButton(text=text, url=url, style=style, icon_custom_emoji_id=icon_id)
 
 
@@ -114,13 +129,23 @@ async def is_member(bot: Bot, user_id: int, chat: str | int) -> bool:
 
 
 async def membership_screen(bot: Bot, user_id: int) -> tuple[bool, str]:
-    if not pyconfig.MEMBERSHIP_GATE_ENABLED:
+    if not GATE_ENABLED:
         return True, ""
     checks: list[tuple[str | int, str]] = [(x, str(x)) for x in REQUIRED] + [(PRIVATE_REQUIRED, "Private group")]
     missing = [label for chat, label in checks if not await is_member(bot, user_id, chat)]
     if not missing:
         return True, ""
     return False, "\n".join(f"• {x}" for x in missing)
+
+def join_button_rows() -> list[list[InlineKeyboardButton]]:
+    rows: list[list[InlineKeyboardButton]] = []
+    for index, destination in enumerate(REQUIRED, 1):
+        url = destination if destination.startswith("http") else f"https://t.me/{destination.lstrip('@')}"
+        rows.append([url_button(f"🟢 JOIN CHANNEL {index}", url, "success")])
+    if PRIVATE_INVITE_LINK:
+        rows.append([url_button("🔴 JOIN PRIVATE GROUP", PRIVATE_INVITE_LINK, "danger")])
+    rows.append([button("✅ VERIFY MEMBERSHIP", "verify", "success")])
+    return rows
 
 
 class Wizard(StatesGroup):
@@ -135,7 +160,7 @@ async def welcome(message: Message, bot: Bot) -> None:
     ok, missing = await membership_screen(bot, message.from_user.id)
     if not ok:
         links = "\n".join(f"• {x}" for x in REQUIRED)
-        await message.answer_photo(pyconfig.BANNER_URL, caption=deco("<b>SKX TALHA ACCESS GATE</b>") + f"\n\nPehle tamam channels/group join karein:\n{links}\n• Private group: <code>{PRIVATE_REQUIRED}</code>\n\nPhir Verify dabayein.", reply_markup=kb([[button("✓ Verify Membership", "verify", "success")]]), parse_mode=ParseMode.HTML)
+        await message.answer_photo(pyconfig.BANNER_URL, caption=deco("<b>SKX TALHA ACCESS GATE</b>") + f"\n\nPehle tamam channels/group join karein:\n{links}\n• Private group: <code>{PRIVATE_REQUIRED}</code>\n\nPhir Verify dabayein.", reply_markup=kb(join_button_rows()), parse_mode=ParseMode.HTML)
         return
     user = await store.load_user(message.from_user.id)
     user["created_at"] = user.get("created_at") or datetime.now(timezone.utc).isoformat()
@@ -191,15 +216,15 @@ async def verify(call: CallbackQuery, bot: Bot):
     ok, missing = await membership_screen(bot, call.from_user.id)
     if not ok:
         await call.answer("Abhi kuch destinations missing hain.", show_alert=True)
-        await call.message.edit_text(deco("<b>ACCESS NOT READY</b>") + f"\n\nMissing:\n{missing}", reply_markup=kb([[button("↻ Verify Again", "verify", "success")]]))
+        await edit_ui(call.message, deco("<b>ACCESS NOT READY</b>") + f"\n\nMissing:\n{missing}", kb(join_button_rows()))
     else:
         await call.answer("Verified")
-        await call.message.edit_text(deco("<b>ACCESS GRANTED</b>") + "\n\nWelcome to your premium workspace.", reply_markup=main_kb(call.from_user.id in OWNER_IDS))
+        await edit_ui(call.message, deco("<b>ACCESS GRANTED</b>") + "\n\nWelcome to your premium workspace.", main_kb(call.from_user.id in OWNER_IDS))
 
 @router.callback_query(F.data == "make")
 async def make(call: CallbackQuery, state: FSMContext):
     await state.clear(); await state.update_data(channel_manager=False, normal_mode=False); await state.set_state(Wizard.text)
-    await call.message.edit_text(deco("<b>MAKE POST</b>") + "\n\nApni post ka text/caption bhejein.", reply_markup=kb([[button("× Cancel", "cancel", "danger")]]))
+    await edit_ui(call.message, deco("<b>MAKE POST</b>") + "\n\nApni post ka text/caption bhejein.", kb([[button("× Cancel", "cancel", "danger")]]))
 
 async def channel_manager_screen(message: Message, user_id: int, edit: bool = False) -> None:
     user = await store.load_user(user_id)
@@ -274,9 +299,9 @@ async def post_text(message: Message, state: FSMContext):
     await message.answer(deco("<b>MEDIA LAYER</b>") + "\n\nPhoto ya video add karni hai?", reply_markup=kb([[button("＋ Add Photo", "add_photo", "success"), button("＋ Add Video", "add_video", "success")], [button("Skip", "media_skip", "primary"), button("Delete", "cancel", "danger")]]))
 
 @router.callback_query(Wizard.media, F.data == "add_photo")
-async def add_photo(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.photo); await call.message.edit_text(deco("<b>ADD PHOTO</b>") + "\n\nAb photo bhejein.")
+async def add_photo(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.photo); await edit_ui(call.message, deco("<b>ADD PHOTO</b>") + "\n\nAb photo bhejein.", kb([[button("Cancel", "cancel", "danger")]]))
 @router.callback_query(Wizard.media, F.data == "add_video")
-async def add_video(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.video); await call.message.edit_text(deco("<b>ADD VIDEO</b>") + "\n\nAb video bhejein.")
+async def add_video(call: CallbackQuery, state: FSMContext): await state.set_state(Wizard.video); await edit_ui(call.message, deco("<b>ADD VIDEO</b>") + "\n\nAb video bhejein.", kb([[button("Cancel", "cancel", "danger")]]))
 @router.callback_query(Wizard.media, F.data == "media_skip")
 async def media_skip(call: CallbackQuery, state: FSMContext): await state.update_data(media_type=None, media_id=None); await ask_button(call.message, state)
 @router.message(Wizard.photo, F.photo)
@@ -325,8 +350,7 @@ def dense_lines(body: str, marks: list[str]) -> str:
 
 def decorate_text(text: str, style: str, refresh: int = 0, premium: bool = True) -> str:
     pool = store.emoji_ids or ["5449569374065152798"]
-    random.seed(f"{text}:{style}:{refresh}")
-    chosen = random.sample(pool, min(7, len(pool)))
+    chosen = rotating_ids(pool, 7)
     while len(chosen) < 7:
         chosen.append(pool[len(chosen) % len(pool)])
     marks = [em(x, SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)]) if premium else SAFE_FALLBACKS[i % len(SAFE_FALLBACKS)] for i, x in enumerate(chosen)]
